@@ -1,0 +1,15 @@
+node_modules/
+.env
+.env.*
+!.env.example
+
+build/
+dist/
+.dart_tool/
+.flutter-plugins
+.flutter-plugins-dependencies
+
+android/.gradle/
+android/local.properties
+
+*.log
