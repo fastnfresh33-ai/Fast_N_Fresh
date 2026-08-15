@@ -1,38 +1,45 @@
 /// Central place to configure the backend API URL.
 ///
-/// IMPORTANT: never hardcode `localhost` and ship it in a release APK —
-/// `localhost` on an Android device refers to the device itself, not your
-/// development PC.
+/// Production backend:
+/// https://fast-n-fresh-backend.onrender.com/api
 ///
-/// - Android Emulator connecting to a backend running on your dev machine:
-///     http://10.0.2.2:5000/api
-/// - Physical device on the same Wi-Fi as your dev machine:
-///     http://10.169.90.212:5000/api
-/// - Production:
-///     https://your-deployed-api-domain.com/api
+/// The API URL can be overridden at build time using:
 ///
-/// This value can be overridden at build time without editing code:
-///   flutter run --dart-define=API_BASE_URL=http://10.0.2.2:5000/api
-///   flutter build apk --release --dart-define=API_BASE_URL=https://api.fastnfreshcafe.com/api
+/// flutter run --dart-define=API_BASE_URL=http://10.0.2.2:5000/api
+///
+/// Production APK:
+///
+/// flutter build apk --release --dart-define=API_BASE_URL=https://fast-n-fresh-backend.onrender.com/api
 
 class ApiConfig {
   ApiConfig._();
 
+  /// Backend API base URL.
+  ///
+  /// For production, the default is the Render backend.
+  /// You can override it at build time using API_BASE_URL.
   static const String baseUrl = String.fromEnvironment(
     'API_BASE_URL',
-    defaultValue: 'http://10.169.90.212:5000/api',
+    defaultValue: 'https://fast-n-fresh-backend.onrender.com/api',
   );
 
+  /// Maximum time allowed to establish a connection.
   static const Duration connectTimeout = Duration(seconds: 15);
 
+  /// Maximum time allowed to receive a response.
   static const Duration receiveTimeout = Duration(seconds: 20);
 
-  /// The API root without the trailing /api.
+  /// The backend host without the trailing `/api`.
   ///
-  /// Used to resolve relative asset URLs such as:
+  /// Example:
+  /// baseUrl:
+  /// https://fast-n-fresh-backend.onrender.com/api
+  ///
+  /// assetHost:
+  /// https://fast-n-fresh-backend.onrender.com
+  ///
+  /// This is useful for resolving relative asset URLs such as:
   /// /uploads/products/example.jpg
-  ///
-  /// This keeps asset URLs consistent with the configured backend.
   static String get assetHost {
     if (baseUrl.endsWith('/api')) {
       return baseUrl.substring(0, baseUrl.length - 4);
@@ -41,12 +48,17 @@ class ApiConfig {
     return baseUrl;
   }
 
-  /// Resolves a relative path like:
-  /// /uploads/products/xyz.jpg
+  /// Resolves a relative or absolute URL.
   ///
-  /// into a full URL using the configured backend.
+  /// Example:
   ///
-  /// Already-absolute URLs are returned unchanged.
+  /// resolveAssetUrl('/uploads/products/example.jpg')
+  ///
+  /// returns:
+  ///
+  /// https://fast-n-fresh-backend.onrender.com/uploads/products/example.jpg
+  ///
+  /// If the URL is already absolute, it is returned unchanged.
   static String resolveAssetUrl(String relativeOrAbsolute) {
     if (relativeOrAbsolute.isEmpty) {
       return relativeOrAbsolute;
@@ -57,6 +69,10 @@ class ApiConfig {
       return relativeOrAbsolute;
     }
 
-    return '$assetHost$relativeOrAbsolute';
+    if (relativeOrAbsolute.startsWith('/')) {
+      return '$assetHost$relativeOrAbsolute';
+    }
+
+    return '$assetHost/$relativeOrAbsolute';
   }
 }
