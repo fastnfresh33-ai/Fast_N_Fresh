@@ -1,11 +1,13 @@
-// Deployment configuration for the customer QR menu.
+// Production configuration for the Fast N Fresh customer QR menu.
 //
-// EDIT THIS FILE per environment before deploying — there is no build step,
-// so this is the equivalent of an env var for this static site.
+// This static menu has no build step, so the API URL is configured here.
 //
-// NEVER set API_BASE_URL to localhost/127.0.0.1/a private IP in production;
-// use the real deployed backend API URL (the same one the Flutter app's
-// API_BASE_URL points to, e.g. https://api.fastnfreshcafe.com/api).
+// IMPORTANT:
+// - Do NOT use localhost in production.
+// - Do NOT use 127.0.0.1 in production.
+// - Do NOT use a private/local IP address in production.
+// - The /api suffix is required because the backend API is mounted at /api.
+
 window.FNF_CONFIG = {
-  API_BASE_URL: 'https://your-deployed-api-domain.com/api',
+  API_BASE_URL: 'https://fast-n-fresh-backend.onrender.com/api',
 };
