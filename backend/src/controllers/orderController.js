@@ -360,6 +360,9 @@ const checkoutOrder = asyncHandler(async (req, res) => {
       order.changeReturned = priced.changeReturned;
       order.customer = priced.customer ? priced.customer._id : undefined;
       order.status = 'completed';
+      // QR orders start with no staff (placed by the customer, unattended).
+      // Whoever checks it out is recorded as the attending staff member.
+      if (!order.staff) order.staff = req.user._id;
       await order.save({ session });
 
       await applyInventoryAndCredit({
@@ -422,7 +425,9 @@ const reassignAttendee = asyncHandler(async (req, res) => {
   if (order.status === 'voided') throw new ApiError(409, 'Cannot reassign a voided order.');
 
   const now = new Date();
-  order.attendedByHistory.push({ user: order.staff, from: order.createdAt, to: now });
+  if (order.staff) {
+    order.attendedByHistory.push({ user: order.staff, from: order.createdAt, to: now });
+  }
   order.staff = userId;
   await order.save();
 

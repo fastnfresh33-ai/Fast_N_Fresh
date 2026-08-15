@@ -47,6 +47,19 @@ class DeliveryInfo {
   }
 }
 
+/// Contact info a customer optionally gave when placing a QR order directly
+/// (no staff/login involved). Absent on regular POS orders.
+class QrCustomerContact {
+  final String? name;
+  final String? phone;
+  QrCustomerContact({this.name, this.phone});
+
+  factory QrCustomerContact.fromJson(Map<String, dynamic>? json) {
+    if (json == null) return QrCustomerContact();
+    return QrCustomerContact(name: json['name'] as String?, phone: json['phone'] as String?);
+  }
+}
+
 class Order {
   final String id;
   final int orderNumber;
@@ -56,9 +69,11 @@ class Order {
   final double tax;
   final double grandTotal;
   final String orderType; // dine_in | takeaway | delivery
+  final String orderSource; // pos | qr — how this order was placed
   final String? tableId;
   final String? tableName;
   final String? tableCustomerLabel;
+  final QrCustomerContact? qrCustomerContact;
   final DeliveryInfo? deliveryInfo;
   final String paymentMethod; // CASH | UPI | CREDIT | MIXED
   final PaymentBreakdown paymentBreakdown;
@@ -82,9 +97,11 @@ class Order {
     required this.tax,
     required this.grandTotal,
     this.orderType = 'takeaway',
+    this.orderSource = 'pos',
     this.tableId,
     this.tableName,
     this.tableCustomerLabel,
+    this.qrCustomerContact,
     this.deliveryInfo,
     required this.paymentMethod,
     required this.paymentBreakdown,
@@ -114,9 +131,13 @@ class Order {
       tax: (json['tax'] as num?)?.toDouble() ?? 0,
       grandTotal: (json['grandTotal'] as num?)?.toDouble() ?? 0,
       orderType: json['orderType'] as String? ?? 'takeaway',
+      orderSource: json['orderSource'] as String? ?? 'pos',
       tableId: tableField is Map ? tableField['_id'] as String? : tableField as String?,
       tableName: tableField is Map ? tableField['name'] as String? : null,
       tableCustomerLabel: json['tableCustomerLabel'] as String?,
+      qrCustomerContact: json['qrCustomerContact'] != null
+          ? QrCustomerContact.fromJson(json['qrCustomerContact'] as Map<String, dynamic>?)
+          : null,
       deliveryInfo: json['deliveryInfo'] != null ? DeliveryInfo.fromJson(json['deliveryInfo'] as Map<String, dynamic>?) : null,
       paymentMethod: json['paymentMethod'] as String? ?? 'CASH',
       paymentBreakdown: PaymentBreakdown.fromJson(json['paymentBreakdown'] as Map<String, dynamic>?),
@@ -132,4 +153,6 @@ class Order {
       createdAt: DateTime.tryParse(json['createdAt'] as String? ?? '') ?? DateTime.now(),
     );
   }
+
+  bool get isQrOrder => orderSource == 'qr';
 }

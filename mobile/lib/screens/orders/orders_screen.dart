@@ -217,6 +217,21 @@ class _OrderTile extends StatelessWidget {
                 children: [
                   Row(children: [
                     Text('#${order.orderNumber}', style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 15)),
+                    if (order.isQrOrder) ...[
+                      const SizedBox(width: 8),
+                      Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 1),
+                        decoration: BoxDecoration(color: AppColors.accent.withValues(alpha: 0.15), borderRadius: BorderRadius.circular(4)),
+                        child: const Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Icon(Icons.qr_code_2, size: 10, color: AppColors.primaryDark),
+                            SizedBox(width: 2),
+                            Text('QR ORDER', style: TextStyle(color: AppColors.primaryDark, fontSize: 9, fontWeight: FontWeight.w700)),
+                          ],
+                        ),
+                      ),
+                    ],
                     if (order.status == 'voided') ...[
                       const SizedBox(width: 8),
                       Container(
@@ -234,7 +249,13 @@ class _OrderTile extends StatelessWidget {
                         : (order.orderType == 'delivery' ? 'Delivery' : 'Takeaway'),
                     style: Theme.of(context).textTheme.bodyMedium,
                   ),
-                  if (order.staffName != null) Text('Attended by: ${order.staffName}', style: Theme.of(context).textTheme.bodyMedium),
+                  if (order.staffName != null) Text('Attended by: ${order.staffName}', style: Theme.of(context).textTheme.bodyMedium)
+                  else if (order.isQrOrder) const Text('Awaiting staff', style: TextStyle(color: AppColors.textMuted)),
+                  if (order.qrCustomerContact?.name != null || order.qrCustomerContact?.phone != null)
+                    Text(
+                      [order.qrCustomerContact?.name, order.qrCustomerContact?.phone].where((s) => s != null && s.isNotEmpty).join(' · '),
+                      style: Theme.of(context).textTheme.bodyMedium,
+                    ),
                 ],
               ),
             ),

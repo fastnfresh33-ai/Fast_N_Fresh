@@ -55,6 +55,24 @@ class TableService {
     }
   }
 
+  /// Sets/changes this table's QR ordering number (used in /menu?table=N).
+  /// Pass `null` to clear it.
+  Future<CafeTable> setQrNumber(String id, int? number) => update(id, {'number': number});
+
+  /// Fetches the PNG QR code image for this table's public ordering URL.
+  /// Requires the table to already have a `number` assigned.
+  Future<List<int>> fetchQrImageBytes(String tableId) async {
+    try {
+      final res = await _dio.get<List<int>>(
+        '/tables/$tableId/qr',
+        options: Options(responseType: ResponseType.bytes),
+      );
+      return res.data ?? const [];
+    } catch (e) {
+      throw DioClient.instance.mapError(e);
+    }
+  }
+
   /// Starts a new open (unpaid) order/tab for one customer on this table.
   Future<Order> startOrder(String tableId, {String? tableCustomerLabel}) async {
     try {

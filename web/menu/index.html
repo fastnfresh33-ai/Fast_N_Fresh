@@ -1,0 +1,98 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, viewport-fit=cover" />
+  <meta name="robots" content="noindex" />
+  <title>Fast N Fresh Cafe — Order</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+
+  <!-- Loading state -->
+  <div id="loadingState" class="full-page-state">
+    <div class="spinner"></div>
+    <h2>Loading menu…</h2>
+  </div>
+
+  <!-- Fatal error state (invalid table / menu failed to load) -->
+  <div id="errorState" class="full-page-state hidden">
+    <div class="error-icon">✕</div>
+    <h2 id="errorTitle">Something went wrong</h2>
+    <p id="errorMessage">Please try again, or ask a staff member for help.</p>
+  </div>
+
+  <!-- Order success state -->
+  <div id="successState" class="full-page-state hidden">
+    <div class="success-icon">✓</div>
+    <h2>Order placed successfully</h2>
+    <p>Your order has been sent to the cafe.</p>
+    <div class="success-card">
+      <div class="success-row"><span>Table</span><span id="successTable">—</span></div>
+      <div class="success-row"><span>Order #</span><span id="successOrderNumber">—</span></div>
+      <div class="success-row"><span>Total</span><span id="successTotal">—</span></div>
+    </div>
+  </div>
+
+  <!-- Main menu app -->
+  <div id="app" class="hidden">
+    <header class="header">
+      <div class="header-top">
+        <div>
+          <div class="brand">Fast N Fresh Cafe</div>
+          <div class="tagline">Browse the menu and order right from your table</div>
+        </div>
+        <div class="table-badge" id="tableBadge">Table —</div>
+      </div>
+      <div class="categories" id="categoryChips"></div>
+    </header>
+
+    <main class="product-list" id="productList"></main>
+
+    <div class="cart-bar hidden" id="cartBar">
+      <div class="cart-bar-left"><span id="cartCount">0</span> item(s) in cart</div>
+      <div class="cart-bar-total" id="cartBarTotal">₹0</div>
+    </div>
+  </div>
+
+  <!-- Cart / checkout sheet -->
+  <div class="overlay hidden" id="cartOverlay">
+    <div class="sheet">
+      <div class="sheet-header">
+        <div class="sheet-title">Your order</div>
+        <button class="close-btn" id="closeCart">✕</button>
+      </div>
+      <div class="sheet-body">
+        <div id="cartLines"></div>
+
+        <div class="summary-row total">
+          <span>Total</span>
+          <span id="cartTotal">₹0</span>
+        </div>
+
+        <div class="field-group">
+          <label class="field-label" for="customerName">Your name</label>
+          <input class="field-input" id="customerName" type="text" placeholder="e.g. Rahul" maxlength="100" />
+        </div>
+        <div class="field-group">
+          <label class="field-label" for="customerPhone">Phone number (optional)</label>
+          <input class="field-input" id="customerPhone" type="tel" placeholder="e.g. 9876543210" maxlength="20" />
+        </div>
+        <div class="field-group">
+          <label class="field-label" for="orderNote">Order note (optional)</label>
+          <textarea class="field-textarea" id="orderNote" placeholder="e.g. Less spicy" maxlength="300"></textarea>
+        </div>
+
+        <div id="checkoutError" class="error-banner hidden"></div>
+
+        <button class="primary-btn" id="placeOrderBtn">Place Order</button>
+      </div>
+    </div>
+  </div>
+
+  <script src="config.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>

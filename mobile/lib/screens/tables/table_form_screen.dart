@@ -16,6 +16,7 @@ class _TableFormScreenState extends State<TableFormScreen> {
   final _service = TableService();
   late final TextEditingController _nameController;
   late final TextEditingController _capacityController;
+  late final TextEditingController _qrNumberController;
   String _status = 'available';
   bool _saving = false;
   String? _error;
@@ -27,6 +28,7 @@ class _TableFormScreenState extends State<TableFormScreen> {
     super.initState();
     _nameController = TextEditingController(text: widget.table?.name ?? '');
     _capacityController = TextEditingController(text: (widget.table?.capacity ?? 4).toString());
+    _qrNumberController = TextEditingController(text: widget.table?.number?.toString() ?? '');
     _status = widget.table?.status ?? 'available';
   }
 
@@ -34,6 +36,7 @@ class _TableFormScreenState extends State<TableFormScreen> {
   void dispose() {
     _nameController.dispose();
     _capacityController.dispose();
+    _qrNumberController.dispose();
     super.dispose();
   }
 
@@ -46,10 +49,12 @@ class _TableFormScreenState extends State<TableFormScreen> {
 
     try {
       if (_isEditing) {
+        final qrText = _qrNumberController.text.trim();
         await _service.update(widget.table!.id, {
           'name': _nameController.text.trim(),
           'capacity': int.tryParse(_capacityController.text) ?? 4,
           'status': _status,
+          'number': qrText.isEmpty ? null : (int.tryParse(qrText) ?? widget.table?.number),
         });
       } else {
         await _service.create(name: _nameController.text.trim(), capacity: int.tryParse(_capacityController.text) ?? 4);
@@ -110,6 +115,16 @@ class _TableFormScreenState extends State<TableFormScreen> {
               decoration: const InputDecoration(labelText: 'Capacity (seats)'),
             ),
             if (_isEditing) ...[
+              const SizedBox(height: 14),
+              TextFormField(
+                controller: _qrNumberController,
+                keyboardType: TextInputType.number,
+                decoration: const InputDecoration(
+                  labelText: 'QR Order Number (optional)',
+                  helperText: 'Used in the customer QR menu link, e.g. /menu?table=5. Leave blank to remove.',
+                  helperMaxLines: 2,
+                ),
+              ),
               const SizedBox(height: 14),
               DropdownButtonFormField<String>(
                 value: _status,

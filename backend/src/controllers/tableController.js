@@ -1,5 +1,19 @@
+const QRCode = require('qrcode');
 const { Table, Order } = require('../models');
 const { ApiError, asyncHandler } = require('../utils/apiError');
+const { publicMenuUrl } = require('../utils/publicUrls');
+
+// Best-effort: pull a number out of a table name like "Table 5" -> 5. Used
+// only as a convenience default when creating a table; never overwrites an
+// explicitly-provided number and silently skips if that number is taken or
+// no digits are found (admin can always set/fix it later via updateTable).
+async function deriveNumberFromName(name) {
+  const match = String(name).match(/(\d+)/);
+  if (!match) return undefined;
+  const candidate = Number(match[1]);
+  const taken = await Table.findOne({ number: candidate });
+  return taken ? undefined : candidate;
+}
 
 // GET /api/tables — list with a computed liveStatus + open order count so the
 // UI never has to guess; `status` itself may lag (e.g. 'reserved') by design.
@@ -38,10 +52,18 @@ const getTable = asyncHandler(async (req, res) => {
 });
 
 const createTable = asyncHandler(async (req, res) => {
-  const { name, capacity } = req.body;
+  const { name, capacity, number } = req.body;
   if (!name || !name.trim()) throw new ApiError(400, 'Table name/number is required.');
 
-  const table = await Table.create({ name: name.trim(), capacity: capacity || 4 });
+  let qrNumber = number;
+  if (qrNumber !== undefined && qrNumber !== null && qrNumber !== '') {
+    const exists = await Table.findOne({ number: qrNumber });
+    if (exists) throw new ApiError(409, `Table number ${qrNumber} is already in use.`);
+  } else {
+    qrNumber = await deriveNumberFromName(name);
+  }
+
+  const table = await Table.create({ name: name.trim(), capacity: capacity || 4, number: qrNumber || undefined });
   res.status(201).json({ success: true, data: table });
 });
 
@@ -49,9 +71,22 @@ const updateTable = asyncHandler(async (req, res) => {
   const table = await Table.findOne({ _id: req.params.id, active: true });
   if (!table) throw new ApiError(404, 'Table not found.');
 
-  const { name, capacity, status } = req.body;
+  const { name, capacity, status, number } = req.body;
   if (name !== undefined) table.name = name.trim();
   if (capacity !== undefined) table.capacity = capacity;
+  if (number !== undefined) {
+    if (number === null || number === '') {
+      table.number = undefined;
+    } else {
+      const numValue = Number(number);
+      if (!Number.isInteger(numValue) || numValue < 1) {
+        throw new ApiError(400, 'Table number must be a positive whole number.');
+      }
+      const clash = await Table.findOne({ number: numValue, _id: { $ne: table._id } });
+      if (clash) throw new ApiError(409, `Table number ${numValue} is already used by "${clash.name}".`);
+      table.number = numValue;
+    }
+  }
   if (status !== undefined) {
     if (!['available', 'occupied', 'reserved'].includes(status)) {
       throw new ApiError(400, 'Invalid status.');
@@ -81,4 +116,30 @@ const deleteTable = asyncHandler(async (req, res) => {
   res.json({ success: true, message: 'Table deactivated.' });
 });
 
-module.exports = { listTables, getTable, createTable, updateTable, deleteTable };
+// GET /api/tables/:id/qr — returns a PNG QR code encoding this table's
+// public ordering URL (https://PUBLIC_FRONTEND_URL/menu?table=N). Admin
+// panel uses this to display/download/print per-table QR codes. Protected
+// like the rest of table management — QR *images* aren't sensitive, but
+// this keeps the surface consistent and avoids an unauthenticated endpoint
+// that enumerates every table.
+const getTableQr = asyncHandler(async (req, res) => {
+  const table = await Table.findOne({ _id: req.params.id, active: true });
+  if (!table) throw new ApiError(404, 'Table not found.');
+  if (!table.number) {
+    throw new ApiError(400, 'This table has no QR number assigned yet. Set one first via Edit Table.');
+  }
+
+  let url;
+  try {
+    url = publicMenuUrl(table.number);
+  } catch (err) {
+    throw new ApiError(500, err.message);
+  }
+
+  const png = await QRCode.toBuffer(url, { type: 'png', width: 512, margin: 2 });
+  res.set('Content-Type', 'image/png');
+  res.set('Content-Disposition', `inline; filename="table-${table.number}-qr.png"`);
+  res.send(png);
+});
+
+module.exports = { listTables, getTable, createTable, updateTable, deleteTable, getTableQr };

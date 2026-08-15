@@ -8,6 +8,7 @@ import '../../services/table_service.dart';
 import '../../providers/auth_provider.dart';
 import 'table_detail_screen.dart';
 import 'table_form_screen.dart';
+import 'qr_management_screen.dart';
 
 class TablesScreen extends StatefulWidget {
   const TablesScreen({super.key});
@@ -116,6 +117,17 @@ class _TablesScreenState extends State<TablesScreen> {
       appBar: AppBar(
         title: const Text('Tables'),
         actions: [
+          if (_canManage)
+            IconButton(
+              tooltip: 'QR Management',
+              onPressed: () async {
+                await Navigator.of(context).push(
+                  MaterialPageRoute(builder: (_) => const QrManagementScreen()),
+                );
+                if (mounted) await _loadTables();
+              },
+              icon: const Icon(Icons.qr_code_2_outlined),
+            ),
           IconButton(
             tooltip: 'Refresh',
             onPressed: _loading ? null : _loadTables,
@@ -379,11 +391,19 @@ class _TableCard extends StatelessWidget {
               ),
             ),
             const SizedBox(height: 2),
-            Text(
-              'Seats ${table.capacity}',
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              style: Theme.of(context).textTheme.bodyMedium,
+            Row(
+              children: [
+                Expanded(
+                  child: Text(
+                    'Seats ${table.capacity}',
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: Theme.of(context).textTheme.bodyMedium,
+                  ),
+                ),
+                if (table.hasQrNumber)
+                  const Icon(Icons.qr_code_2, size: 14, color: AppColors.textMuted),
+              ],
             ),
           ],
         ),

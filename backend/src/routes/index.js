@@ -18,6 +18,7 @@ router.use('/tables', require('./tableRoutes'));
 router.use('/uploads', require('./uploadRoutes'));
 router.use('/users', require('./userRoutes'));
 router.use('/attendance', require('./attendanceRoutes'));
+router.use('/public', require('./publicRoutes'));
 
 router.get('/health', (req, res) => res.json({ success: true, message: 'Fast N Fresh Cafe API is running.' }));
 

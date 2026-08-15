@@ -107,8 +107,16 @@ async function seed() {
   for (const name of tableNames) {
     const exists = await Table.findOne({ name });
     if (!exists) {
-      await Table.create({ name, capacity: 4 });
-      console.log(`  Created table: ${name}`);
+      const number = Number(name.match(/(\d+)/)[1]); // QR ordering number, e.g. "Table 5" -> 5
+      await Table.create({ name, capacity: 4, number });
+      console.log(`  Created table: ${name} (QR #${number})`);
+    } else if (!exists.number) {
+      const match = name.match(/(\d+)/);
+      if (match) {
+        exists.number = Number(match[1]);
+        await exists.save();
+        console.log(`  Assigned QR #${exists.number} to existing table: ${name}`);
+      }
     }
   }
 

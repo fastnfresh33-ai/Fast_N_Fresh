@@ -11,4 +11,25 @@ const loginLimiter = rateLimit({
   },
 });
 
-module.exports = { loginLimiter };
+// Public menu is read-only but hit by every customer's phone on every page
+// load/refresh — generous but bounded.
+const publicMenuLimiter = rateLimit({
+  windowMs: 60 * 1000,
+  max: Number(process.env.PUBLIC_MENU_RATE_LIMIT_MAX) || 60,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { success: false, message: 'Too many requests. Please try again shortly.' },
+});
+
+// Placing an order writes to the DB, so keep this tighter per IP to blunt
+// scripted abuse while still allowing a genuine customer to retry a failed
+// order a few times.
+const publicOrderLimiter = rateLimit({
+  windowMs: 5 * 60 * 1000,
+  max: Number(process.env.PUBLIC_ORDER_RATE_LIMIT_MAX) || 15,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { success: false, message: 'Too many orders placed from this device. Please wait a few minutes and try again.' },
+});
+
+module.exports = { loginLimiter, publicMenuLimiter, publicOrderLimiter };

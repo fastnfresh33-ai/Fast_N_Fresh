@@ -1,8 +1,5 @@
 require('dotenv').config();
 
-const dns = require('dns');
-dns.setServers(['8.8.8.8', '1.1.1.1']);
-
 const express = require('express');
 const path = require('path');
 const cors = require('cors');
@@ -23,10 +20,7 @@ app.use(helmet({ crossOriginResourcePolicy: { policy: 'cross-origin' } }));
 app.use(express.json({ limit: '2mb' }));
 app.use(mongoSanitize());
 
-const allowedOrigins = (process.env.CORS_ORIGIN || '*')
-  .split(',')
-  .map((o) => o.trim());
-
+const allowedOrigins = (process.env.CORS_ORIGIN || '*').split(',').map((o) => o.trim());
 app.use(
   cors({
     origin: allowedOrigins.includes('*') ? true : allowedOrigins,
@@ -34,27 +28,16 @@ app.use(
 );
 
 if (process.env.NODE_ENV !== 'test') {
-  app.use(
-    morgan(
-      process.env.NODE_ENV === 'production' ? 'combined' : 'dev'
-    )
-  );
+  app.use(morgan(process.env.NODE_ENV === 'production' ? 'combined' : 'dev'));
 }
 
 // Serves uploaded product photos at e.g. GET /uploads/products/xyz.jpg —
 // the Flutter app stores/loads the relative URL returned at upload time and
 // resolves it against ApiConfig.baseUrl, so no path is ever hard-coded.
-app.use(
-  '/uploads',
-  express.static(path.join(__dirname, '..', 'uploads'))
-);
+app.use('/uploads', express.static(path.join(__dirname, '..', 'uploads')));
 
 app.get('/', (req, res) => {
-  res.json({
-    success: true,
-    message: 'FAST N FRESH CAFE API',
-    version: '1.0.0',
-  });
+  res.json({ success: true, message: 'FAST N FRESH CAFE API', version: '1.0.0' });
 });
 
 app.use('/api', routes);
@@ -66,11 +49,8 @@ const PORT = process.env.PORT || 5000;
 
 async function start() {
   await connectDB();
-
   app.listen(PORT, () => {
-    console.log(
-      `Fast N Fresh Cafe API listening on port ${PORT} [${process.env.NODE_ENV || 'development'}]`
-    );
+    console.log(`Fast N Fresh Cafe API listening on port ${PORT} [${process.env.NODE_ENV || 'development'}]`);
   });
 }
 

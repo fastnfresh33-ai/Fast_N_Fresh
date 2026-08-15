@@ -128,6 +128,20 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
               Text('This order has been voided', style: TextStyle(color: AppColors.danger, fontWeight: FontWeight.w600)),
             ]),
           ),
+        if (order.isQrOrder)
+          Container(
+            margin: const EdgeInsets.only(bottom: 14),
+            padding: const EdgeInsets.all(12),
+            decoration: BoxDecoration(color: AppColors.primaryLight, borderRadius: BorderRadius.circular(10)),
+            child: Row(children: [
+              const Icon(Icons.qr_code_2, color: AppColors.primaryDark, size: 18),
+              const SizedBox(width: 8),
+              Text(
+                order.staffName == null ? 'Placed by customer via QR menu · awaiting staff' : 'Placed by customer via QR menu',
+                style: const TextStyle(color: AppColors.primaryDark, fontWeight: FontWeight.w600),
+              ),
+            ]),
+          ),
         Container(
           padding: const EdgeInsets.all(16),
           decoration: BoxDecoration(color: AppColors.surface, borderRadius: BorderRadius.circular(14), border: Border.all(color: AppColors.border)),
@@ -143,6 +157,8 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
               ),
               if (order.staffName != null) Text('Attended by: ${order.staffName}', style: Theme.of(context).textTheme.bodyMedium),
               if (order.customerName != null) Text('Customer: ${order.customerName}', style: Theme.of(context).textTheme.bodyMedium),
+              if (order.qrCustomerContact?.name != null) Text('Customer: ${order.qrCustomerContact!.name}', style: Theme.of(context).textTheme.bodyMedium),
+              if (order.qrCustomerContact?.phone != null) Text('Phone: ${order.qrCustomerContact!.phone}', style: Theme.of(context).textTheme.bodyMedium),
               const Divider(height: 24),
               ...order.items.map((item) => Padding(
                     padding: const EdgeInsets.symmetric(vertical: 4),

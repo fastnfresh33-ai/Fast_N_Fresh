@@ -21,11 +21,21 @@ const orderSchema = new mongoose.Schema(
 
     // Order type: which channel this order came through.
     orderType: { type: String, enum: ['dine_in', 'takeaway', 'delivery'], default: 'takeaway', index: true },
+    // Where the order originated. 'qr' orders are placed by a customer via
+    // the public /menu page (no logged-in user) and start unattended; 'pos'
+    // covers every existing staff-entered order (unchanged default).
+    orderSource: { type: String, enum: ['pos', 'qr'], default: 'pos', index: true },
     // Only set for dine_in orders. References the physical Table.
     table: { type: mongoose.Schema.Types.ObjectId, ref: 'Table' },
     // Distinguishes multiple simultaneous customers/orders on the same table
     // (e.g. "Customer 1", "Customer 2"). Purely a display label.
     tableCustomerLabel: { type: String, trim: true },
+    // Contact info a customer optionally gives when placing a QR order
+    // directly (no account/login). Not used by POS-entered orders.
+    qrCustomerContact: {
+      name: { type: String, trim: true },
+      phone: { type: String, trim: true },
+    },
     // Only used for orderType = 'delivery'. Reuses the existing Customer
     // system where possible (see `customer` field below) — these fields
     // exist for delivery-specific details or walk-in delivery without a
@@ -57,8 +67,16 @@ const orderSchema = new mongoose.Schema(
     // Automatically set to the authenticated user at order-start time —
     // never entered manually. Kept as `staff` for backward compatibility
     // with the existing schema/reports; new code should read this as
-    // "attendedBy".
-    staff: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true },
+    // "attendedBy". A QR order has no logged-in user when the customer
+    // places it, so it starts with no staff and gets attributed to whoever
+    // checks it out (see orderController.checkoutOrder).
+    staff: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'User',
+      required: function () {
+        return this.orderSource !== 'qr';
+      },
+    },
     // Optional handover trail if a different employee takes over the same
     // customer/order before it's completed. Most orders will have none.
     attendedByHistory: [

@@ -6,6 +6,10 @@ const mongoose = require('mongoose');
 const tableSchema = new mongoose.Schema(
   {
     name: { type: String, required: true, trim: true }, // e.g. "Table 1"
+    // Numeric identifier used in customer-facing QR ordering URLs, e.g.
+    // /menu?table=5. Optional/sparse so existing tables keep working before
+    // a number is assigned; enforced unique among tables that have one set.
+    number: { type: Number, min: 1, unique: true, sparse: true },
     capacity: { type: Number, default: 4, min: 1 },
     status: { type: String, enum: ['available', 'occupied', 'reserved'], default: 'available' },
     active: { type: Boolean, default: true }, // soft delete/deactivate — never hard-delete a table with order history
