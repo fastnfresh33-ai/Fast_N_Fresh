@@ -11,7 +11,8 @@ void main() {
   WidgetsFlutterBinding.ensureInitialized();
 
   final authProvider = AuthProvider();
-  // Wire the Dio 401 interceptor to force a logout when the session becomes invalid.
+
+  // Handle confirmed unauthorized responses.
   DioClient.instance.onUnauthorized = authProvider.forceLogout;
 
   runApp(
@@ -27,8 +28,6 @@ void main() {
   );
 }
 
-/// Kicks off session restoration ("remember session") once, then hands off
-/// to the themed app widget.
 class _AppBootstrapper extends StatefulWidget {
   const _AppBootstrapper();
 
@@ -40,11 +39,14 @@ class _AppBootstrapperState extends State<_AppBootstrapper> {
   @override
   void initState() {
     super.initState();
+
     WidgetsBinding.instance.addPostFrameCallback((_) {
       context.read<AuthProvider>().restoreSession();
     });
   }
 
   @override
-  Widget build(BuildContext context) => const FastNFreshApp();
+  Widget build(BuildContext context) {
+    return const FastNFreshApp();
+  }
 }

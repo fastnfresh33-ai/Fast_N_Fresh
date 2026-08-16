@@ -17,7 +17,7 @@ class AuthProvider extends ChangeNotifier {
 
   bool get isAdmin => currentUser?.isAdmin ?? false;
 
-  /// Called on app start to restore a previously "remembered" session.
+  /// Restores the locally saved session when the app starts.
   Future<void> restoreSession() async {
     final token = await TokenStorage.instance.readToken();
     final userJson = await TokenStorage.instance.readUserJson();
@@ -29,17 +29,33 @@ class AuthProvider extends ChangeNotifier {
     }
 
     try {
-      currentUser = AppUser.fromJson(jsonDecode(userJson) as Map<String, dynamic>);
+      currentUser =
+          AppUser.fromJson(jsonDecode(userJson) as Map<String, dynamic>);
+
       status = AuthStatus.authenticated;
       notifyListeners();
 
-      // Validate the token is still good in the background; log out if not.
+      // Validate the session in the background.
       final freshUser = await _authService.getMe();
+
       currentUser = freshUser;
-      await TokenStorage.instance.saveUserJson(jsonEncode(freshUser.toJson()));
+
+      await TokenStorage.instance.saveUserJson(
+        jsonEncode(freshUser.toJson()),
+      );
+
       notifyListeners();
+    } on ApiException catch (e) {
+      // Only clear the session when the server explicitly rejects the token.
+      if (e.statusCode == 401) {
+        await logout();
+        return;
+      }
+
+      // Keep the local session when the problem is network, timeout,
+      // server startup, or another temporary error.
     } catch (_) {
-      await logout();
+      // Keep the local session for unexpected temporary failures.
     }
   }
 
@@ -49,22 +65,30 @@ class AuthProvider extends ChangeNotifier {
     notifyListeners();
 
     try {
-      final (token, user) = await _authService.login(identifier, password);
+      final (token, user) =
+          await _authService.login(identifier, password);
+
       await TokenStorage.instance.saveToken(token);
-      await TokenStorage.instance.saveUserJson(jsonEncode(user.toJson()));
+      await TokenStorage.instance.saveUserJson(
+        jsonEncode(user.toJson()),
+      );
+
       currentUser = user;
       status = AuthStatus.authenticated;
       isLoading = false;
+
       notifyListeners();
       return true;
     } on ApiException catch (e) {
       errorMessage = e.message;
       isLoading = false;
+
       notifyListeners();
       return false;
-    } catch (e) {
+    } catch (_) {
       errorMessage = 'Unable to log in. Please try again.';
       isLoading = false;
+
       notifyListeners();
       return false;
     }
@@ -72,16 +96,20 @@ class AuthProvider extends ChangeNotifier {
 
   Future<void> logout() async {
     await TokenStorage.instance.clear();
+
     currentUser = null;
     status = AuthStatus.unauthenticated;
+
     notifyListeners();
   }
 
-  /// Invoked by the Dio 401 interceptor when the session becomes invalid.
-  void forceLogout() {
-    TokenStorage.instance.clear();
+  /// Clears the session when authentication is confirmed to be invalid.
+  Future<void> forceLogout() async {
+    await TokenStorage.instance.clear();
+
     currentUser = null;
     status = AuthStatus.unauthenticated;
+
     notifyListeners();
   }
 }

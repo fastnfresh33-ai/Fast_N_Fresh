@@ -26,7 +26,7 @@ class _TablesScreenState extends State<TablesScreen> {
 
   bool get _canManage {
     final user = context.read<AuthProvider>().currentUser;
-    return user?.isAdmin ?? false;
+    return user?.canManageTables ?? false;
   }
 
   @override

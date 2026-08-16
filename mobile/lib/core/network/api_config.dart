@@ -1,38 +1,51 @@
 /// Central place to configure the backend API URL.
 ///
-/// IMPORTANT: never hardcode `localhost` and ship it in a release APK —
-/// `localhost` on an Android device refers to the device itself, not your
-/// development PC.
+/// IMPORTANT:
+/// Never ship localhost, 127.0.0.1, or a local PC IP in a production APK.
 ///
-/// - Android Emulator connecting to a backend running on your dev machine:
-///     http://10.0.2.2:5000/api
-/// - Physical device on the same Wi-Fi as your dev machine:
-///     http://10.169.90.212:5000/api
-/// - Production:
-///     https://your-deployed-api-domain.com/api
+/// Production APK:
+///   flutter build apk --release \
+///     --dart-define=API_BASE_URL=https://YOUR-RENDER-URL.onrender.com/api
 ///
-/// This value can be overridden at build time without editing code:
-///   flutter run --dart-define=API_BASE_URL=http://10.0.2.2:5000/api
-///   flutter build apk --release --dart-define=API_BASE_URL=https://api.fastnfreshcafe.com/api
+/// Example:
+///   flutter build apk --release \
+///     --dart-define=API_BASE_URL=https://fast-n-fresh-cafe.onrender.com/api
+///
+/// Android Emulator + local backend:
+///   http://10.0.2.2:5000/api
+///
+/// Physical phone + local backend on same Wi-Fi:
+///   http://10.169.90.212:5000/api
 
 class ApiConfig {
   ApiConfig._();
 
+  /// Backend API URL.
+  ///
+  /// IMPORTANT:
+  /// The production APK should always be built with:
+  ///
+  /// --dart-define=API_BASE_URL=https://YOUR-RENDER-URL.onrender.com/api
+  ///
+  /// The default below is intentionally empty so that a production build
+  /// cannot silently connect to your local PC.
   static const String baseUrl = String.fromEnvironment(
     'API_BASE_URL',
-    defaultValue: 'http://10.169.90.212:5000/api',
+    defaultValue: '',
   );
 
+  /// Connection timeout.
   static const Duration connectTimeout = Duration(seconds: 15);
 
+  /// Server response timeout.
   static const Duration receiveTimeout = Duration(seconds: 20);
 
-  /// The API root without the trailing /api.
+  /// Returns the API root without the trailing `/api`.
   ///
-  /// Used to resolve relative asset URLs such as:
-  /// /uploads/products/example.jpg
-  ///
-  /// This keeps asset URLs consistent with the configured backend.
+  /// Example:
+  /// https://example.onrender.com/api
+  /// becomes:
+  /// https://example.onrender.com
   static String get assetHost {
     if (baseUrl.endsWith('/api')) {
       return baseUrl.substring(0, baseUrl.length - 4);
@@ -41,12 +54,13 @@ class ApiConfig {
     return baseUrl;
   }
 
-  /// Resolves a relative path like:
-  /// /uploads/products/xyz.jpg
+  /// Converts a relative asset path into a complete URL.
   ///
-  /// into a full URL using the configured backend.
+  /// Example:
+  /// /uploads/products/example.jpg
   ///
-  /// Already-absolute URLs are returned unchanged.
+  /// becomes:
+  /// https://example.onrender.com/uploads/products/example.jpg
   static String resolveAssetUrl(String relativeOrAbsolute) {
     if (relativeOrAbsolute.isEmpty) {
       return relativeOrAbsolute;

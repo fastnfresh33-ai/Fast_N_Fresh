@@ -1,0 +1,589 @@
+const mongoose = require('mongoose');
+const { Order, Product, Customer, Table, Counter, CreditTransaction, InventoryTransaction } = require('../models');
+const { ApiError, asyncHandler } = require('../utils/apiError');
+
+function round2(n) {
+  return Math.round((n + Number.EPSILON) * 100) / 100;
+}
+
+// Shared by createOrder (direct/atomic bills - takeaway, delivery, quick
+// dine-in) and checkoutOrder (finalizing an open dine-in tab). Validates
+// products against current prices/stock, computes totals and payment split
+// on the server, and resolves the credit customer. Does NOT touch the
+// database - callers apply the results inside their own transaction.
+async function priceAndValidate({ items, discount, paymentMethod, amountReceived, customerId, cashPortion, upiPortion, creditPortion, session }) {
+  if (!Array.isArray(items) || items.length === 0) {
+    throw new ApiError(400, 'Cart is empty. Add at least one item.');
+  }
+  if (!['CASH', 'UPI', 'CREDIT', 'MIXED'].includes(paymentMethod)) {
+    throw new ApiError(400, 'A valid payment method is required.');
+  }
+
+  const productIds = items.map((i) => i.productId || i.product);
+  const products = await Product.find({ _id: { $in: productIds }, isDeleted: false }).session(session);
+  const productMap = new Map(products.map((p) => [p._id.toString(), p]));
+
+  const orderItems = [];
+  let subtotal = 0;
+
+  for (const line of items) {
+    const productId = line.productId || line.product;
+    const product = productMap.get(String(productId));
+    const quantity = Number(line.quantity);
+
+    if (!product) throw new ApiError(400, 'Product not found or unavailable.');
+    if (product.status !== 'available') throw new ApiError(400, `${product.name} is currently unavailable.`);
+    if (!Number.isFinite(quantity) || quantity < 1) throw new ApiError(400, `Invalid quantity for ${product.name}.`);
+    if (product.trackInventory && product.stock < quantity) {
+      throw new ApiError(400, `Insufficient stock for ${product.name}. Available: ${product.stock}.`);
+    }
+
+    const lineTotal = round2(product.sellingPrice * quantity);
+    subtotal = round2(subtotal + lineTotal);
+
+    orderItems.push({ product: product._id, name: product.name, price: product.sellingPrice, quantity, total: lineTotal });
+  }
+
+  const safeDiscount = Math.max(0, Math.min(Number(discount) || 0, subtotal));
+  const grandTotal = round2(subtotal - safeDiscount);
+
+  let paymentBreakdown = { cash: 0, upi: 0, credit: 0 };
+  if (paymentMethod === 'CASH') paymentBreakdown.cash = grandTotal;
+  if (paymentMethod === 'UPI') paymentBreakdown.upi = grandTotal;
+  if (paymentMethod === 'CREDIT') paymentBreakdown.credit = grandTotal;
+  if (paymentMethod === 'MIXED') {
+    paymentBreakdown = {
+      cash: round2(Number(cashPortion) || 0),
+      upi: round2(Number(upiPortion) || 0),
+      credit: round2(Number(creditPortion) || 0),
+    };
+    const sum = round2(paymentBreakdown.cash + paymentBreakdown.upi + paymentBreakdown.credit);
+    if (sum !== grandTotal) {
+      throw new ApiError(400, `Mixed payment split (Rs ${sum}) does not equal grand total (Rs ${grandTotal}).`);
+    }
+  }
+
+  let changeReturned = 0;
+  if (paymentMethod === 'CASH' && amountReceived !== undefined) {
+    const received = Number(amountReceived);
+    if (received < grandTotal) throw new ApiError(400, 'Amount received is less than the grand total.');
+    changeReturned = round2(received - grandTotal);
+  }
+
+  let customer = null;
+  if (customerId) {
+    customer = await Customer.findById(customerId).session(session);
+    if (!customer) throw new ApiError(404, 'Selected customer not found.');
+  }
+  if (paymentBreakdown.credit > 0 && !customer) {
+    throw new ApiError(400, 'A customer must be selected for the credit portion of this bill.');
+  }
+
+  return { orderItems, productMap, subtotal, safeDiscount, grandTotal, paymentBreakdown, changeReturned, customer };
+}
+
+// Applies the priced result to the DB: deducts inventory and updates the
+// customer credit ledger. Shared by createOrder and checkoutOrder.
+async function applyInventoryAndCredit({ session, req, order, orderItems, productMap, customer, paymentBreakdown, grandTotal }) {
+  for (const line of orderItems) {
+    const product = productMap.get(line.product.toString());
+    if (product.trackInventory) {
+      product.stock -= line.quantity;
+      await product.save({ session });
+
+      await InventoryTransaction.create(
+        [
+          {
+            product: product._id,
+            type: 'SALE',
+            quantity: -line.quantity,
+            stockAfter: product.stock,
+            reason: `Sold in bill #${order.orderNumber}`,
+            order: order._id,
+            recordedBy: req.user._id,
+          },
+        ],
+        { session }
+      );
+    }
+  }
+
+  if (customer && paymentBreakdown.credit > 0) {
+    customer.totalPurchases = round2(customer.totalPurchases + grandTotal);
+    customer.outstandingBalance = round2(customer.outstandingBalance + paymentBreakdown.credit);
+    await customer.save({ session });
+
+    await CreditTransaction.create(
+      [
+        {
+          customer: customer._id,
+          type: 'DEBIT',
+          amount: paymentBreakdown.credit,
+          method: 'ORDER',
+          order: order._id,
+          balanceAfter: customer.outstandingBalance,
+          note: `Bill #${order.orderNumber}`,
+          recordedBy: req.user._id,
+        },
+      ],
+      { session }
+    );
+  } else if (customer) {
+    customer.totalPurchases = round2(customer.totalPurchases + grandTotal);
+    await customer.save({ session });
+  }
+}
+
+// POST /api/orders
+// Direct, atomic bill creation - used for Takeaway, Delivery, and quick
+// Dine-In bills that don't need the open-tab flow. Unchanged in spirit from
+// the original implementation; now also accepts orderType/table/deliveryInfo.
+const createOrder = asyncHandler(async (req, res) => {
+  const {
+    items,
+    discount = 0,
+    paymentMethod,
+    amountReceived,
+    upiReference,
+    customerId,
+    notes,
+    cashPortion,
+    upiPortion,
+    creditPortion,
+    orderType,
+    tableId,
+    tableCustomerLabel,
+    deliveryInfo,
+  } = req.body;
+
+  const needsCredit = paymentMethod === 'CREDIT' || (paymentMethod === 'MIXED' && Number(creditPortion) > 0);
+  if (needsCredit && !customerId) {
+    throw new ApiError(400, 'A customer must be selected for UDHAR / credit payments.');
+  }
+  if (orderType === 'dine_in' && !tableId) {
+    throw new ApiError(400, 'A table must be selected for Dine-In orders.');
+  }
+
+  const session = await mongoose.startSession();
+  let savedOrder;
+  let updatedCustomer = null;
+
+  try {
+    await session.withTransaction(async () => {
+      const priced = await priceAndValidate({
+        items,
+        discount,
+        paymentMethod,
+        amountReceived,
+        customerId,
+        cashPortion,
+        upiPortion,
+        creditPortion,
+        session,
+      });
+
+      let table = null;
+      if (tableId) {
+        table = await Table.findOne({ _id: tableId, active: true }).session(session);
+        if (!table) throw new ApiError(404, 'Selected table not found.');
+      }
+
+      const orderNumber = await Counter.getNextSequence('orderNumber');
+
+      const [order] = await Order.create(
+        [
+          {
+            orderNumber,
+            items: priced.orderItems,
+            subtotal: priced.subtotal,
+            discount: priced.safeDiscount,
+            tax: 0,
+            grandTotal: priced.grandTotal,
+            orderType: orderType || 'takeaway',
+            table: table ? table._id : undefined,
+            tableCustomerLabel,
+            deliveryInfo: orderType === 'delivery' ? deliveryInfo : undefined,
+            paymentMethod,
+            paymentBreakdown: priced.paymentBreakdown,
+            upiReference,
+            amountReceived,
+            changeReturned: priced.changeReturned,
+            customer: priced.customer ? priced.customer._id : undefined,
+            notes,
+            staff: req.user._id,
+            status: 'completed',
+          },
+        ],
+        { session }
+      );
+
+      await applyInventoryAndCredit({
+        session,
+        req,
+        order,
+        orderItems: priced.orderItems,
+        productMap: priced.productMap,
+        customer: priced.customer,
+        paymentBreakdown: priced.paymentBreakdown,
+        grandTotal: priced.grandTotal,
+      });
+
+      savedOrder = order;
+      updatedCustomer = priced.customer;
+    });
+  } finally {
+    session.endSession();
+  }
+
+  const populated = await Order.findById(savedOrder._id)
+    .populate('customer', 'name phone')
+    .populate('staff', 'name role')
+    .populate('table', 'name');
+
+  res.status(201).json({
+    success: true,
+    message: 'Bill created successfully.',
+    data: { order: populated, customer: updatedCustomer },
+  });
+});
+
+// POST /api/tables/:tableId/orders  - starts a new open (unpaid) Dine-In tab
+// for one customer/order on the given table. Multiple of these can exist on
+// the same table simultaneously - each is a fully separate order.
+const startTableOrder = asyncHandler(async (req, res) => {
+  const { tableId } = req.params;
+  const { tableCustomerLabel } = req.body;
+
+  const table = await Table.findOne({ _id: tableId, active: true });
+  if (!table) throw new ApiError(404, 'Table not found.');
+
+  const openOrderNumber = (await Order.countDocuments({ table: table._id, status: 'open' })) + 1;
+
+  const order = await Order.create({
+    orderNumber: await Counter.getNextSequence('orderNumber'),
+    items: [],
+    orderType: 'dine_in',
+    table: table._id,
+    tableCustomerLabel: tableCustomerLabel || `Customer ${openOrderNumber}`,
+    subtotal: 0,
+    grandTotal: 0,
+    staff: req.user._id,
+    status: 'open',
+  });
+
+  res.status(201).json({ success: true, data: order });
+});
+
+// PUT /api/orders/:id/items - replaces the item list on an OPEN order (a
+// dine-in tab that hasn't been paid yet) and re-prices it from current
+// product prices. No inventory or credit effects happen here - those only
+// happen at checkout, exactly like the existing atomic flow.
+const updateOpenOrderItems = asyncHandler(async (req, res) => {
+  const { items = [], discount = 0, notes, customerId } = req.body;
+
+  const order = await Order.findById(req.params.id);
+  if (!order) throw new ApiError(404, 'Order not found.');
+  if (order.status !== 'open') throw new ApiError(409, 'This order has already been billed and can no longer be edited.');
+
+  const orderItems = [];
+  let subtotal = 0;
+
+  if (items.length > 0) {
+    const productIds = items.map((i) => i.productId);
+    const products = await Product.find({ _id: { $in: productIds }, isDeleted: false });
+    const productMap = new Map(products.map((p) => [p._id.toString(), p]));
+
+    for (const line of items) {
+      const product = productMap.get(String(line.productId));
+      const quantity = Number(line.quantity);
+      if (!product) throw new ApiError(400, 'Product not found or unavailable.');
+      if (!Number.isFinite(quantity) || quantity < 1) throw new ApiError(400, `Invalid quantity for ${product.name}.`);
+
+      const lineTotal = round2(product.sellingPrice * quantity);
+      subtotal = round2(subtotal + lineTotal);
+      orderItems.push({ product: product._id, name: product.name, price: product.sellingPrice, quantity, total: lineTotal });
+    }
+  }
+
+  const safeDiscount = Math.max(0, Math.min(Number(discount) || 0, subtotal));
+
+  order.items = orderItems;
+  order.subtotal = subtotal;
+  order.discount = safeDiscount;
+  order.grandTotal = round2(subtotal - safeDiscount);
+  if (notes !== undefined) order.notes = notes;
+  if (customerId !== undefined) order.customer = customerId || undefined;
+
+  await order.save();
+  res.json({ success: true, data: order });
+});
+
+// POST /api/orders/:id/checkout - finalizes an open dine-in tab: re-validates
+// prices/stock one more time, deducts inventory, updates the credit ledger,
+// and marks the order completed. Reuses the exact same pricing/apply logic
+// as the direct createOrder flow.
+const checkoutOrder = asyncHandler(async (req, res) => {
+  const { paymentMethod, amountReceived, upiReference, customerId, cashPortion, upiPortion, creditPortion, discount } = req.body;
+
+  const session = await mongoose.startSession();
+  let finalized;
+  let updatedCustomer = null;
+
+  try {
+    await session.withTransaction(async () => {
+      const order = await Order.findById(req.params.id).session(session);
+      if (!order) throw new ApiError(404, 'Order not found.');
+      if (order.status !== 'open') throw new ApiError(409, 'This order is not open for checkout.');
+      if (order.items.length === 0) throw new ApiError(400, 'Add at least one item before checking out.');
+
+      const effectiveCustomerId = customerId !== undefined ? customerId : order.customer;
+      const priced = await priceAndValidate({
+        items: order.items.map((i) => ({ productId: i.product, quantity: i.quantity })),
+        discount: discount !== undefined ? discount : order.discount,
+        paymentMethod,
+        amountReceived,
+        customerId: effectiveCustomerId,
+        cashPortion,
+        upiPortion,
+        creditPortion,
+        session,
+      });
+
+      order.items = priced.orderItems;
+      order.subtotal = priced.subtotal;
+      order.discount = priced.safeDiscount;
+      order.grandTotal = priced.grandTotal;
+      order.paymentMethod = paymentMethod;
+      order.paymentBreakdown = priced.paymentBreakdown;
+      order.upiReference = upiReference;
+      order.amountReceived = amountReceived;
+      order.changeReturned = priced.changeReturned;
+      order.customer = priced.customer ? priced.customer._id : undefined;
+      order.status = 'completed';
+      // QR orders start with no staff (placed by the customer, unattended).
+      // Whoever checks it out is recorded as the attending staff member.
+      if (!order.staff) order.staff = req.user._id;
+      await order.save({ session });
+
+      await applyInventoryAndCredit({
+        session,
+        req,
+        order,
+        orderItems: priced.orderItems,
+        productMap: priced.productMap,
+        customer: priced.customer,
+        paymentBreakdown: priced.paymentBreakdown,
+        grandTotal: priced.grandTotal,
+      });
+
+      finalized = order;
+      updatedCustomer = priced.customer;
+    });
+  } finally {
+    session.endSession();
+  }
+
+  const populated = await Order.findById(finalized._id)
+    .populate('customer', 'name phone')
+    .populate('staff', 'name role')
+    .populate('table', 'name');
+
+  res.json({
+    success: true,
+    message: 'Bill created successfully.',
+    data: { order: populated, customer: updatedCustomer },
+  });
+});
+
+// DELETE /api/orders/:id - cancels an OPEN (unpaid) order, e.g. a customer
+// leaves without ordering. No inventory/credit reversal needed since none
+// was ever applied. Completed orders must use /void instead.
+const cancelOpenOrder = asyncHandler(async (req, res) => {
+  const order = await Order.findById(req.params.id);
+  if (!order) throw new ApiError(404, 'Order not found.');
+  if (order.status !== 'open') throw new ApiError(409, 'Only an unpaid, open order can be cancelled this way. Use void for completed orders.');
+
+  order.status = 'voided';
+  order.voidedAt = new Date();
+  order.voidedBy = req.user._id;
+  order.voidReason = (req.body && req.body.reason) || 'Cancelled before payment';
+  await order.save();
+
+  res.json({ success: true, message: 'Order cancelled.' });
+});
+
+// PATCH /api/orders/:id/attendee - handover: reassign who is attending this
+// customer/order. Admin/manager only. The order's `staff` field always
+// reflects the current/final attendee; the previous one is preserved in
+// attendedByHistory.
+const reassignAttendee = asyncHandler(async (req, res) => {
+  const { userId } = req.body;
+  if (!userId) throw new ApiError(400, 'userId is required.');
+
+  const order = await Order.findById(req.params.id);
+  if (!order) throw new ApiError(404, 'Order not found.');
+  if (order.status === 'voided') throw new ApiError(409, 'Cannot reassign a voided order.');
+
+  const now = new Date();
+  if (order.staff) {
+    order.attendedByHistory.push({ user: order.staff, from: order.createdAt, to: now });
+  }
+  order.staff = userId;
+  await order.save();
+
+  const populated = await Order.findById(order._id).populate('staff', 'name role');
+  res.json({ success: true, data: populated });
+});
+
+// GET /api/orders?from=&to=&paymentMethod=&staff=&customer=&search=&page=&limit=&orderType=&table=&status=
+const listOrders = asyncHandler(async (req, res) => {
+  const { from, to, paymentMethod, staff, customer, search, status, orderType, table } = req.query;
+  const page = Math.max(parseInt(req.query.page, 10) || 1, 1);
+  const limit = Math.min(parseInt(req.query.limit, 10) || 30, 200);
+
+  const filter = {};
+  if (paymentMethod) filter.paymentMethod = paymentMethod;
+  if (orderType) filter.orderType = orderType;
+  if (table) filter.table = table;
+  if (customer) filter.customer = customer;
+
+  // Orders history defaults to billed orders only - in-progress dine-in
+  // tabs are surfaced via the table screens, not the sales history list.
+  filter.status = status || { $ne: 'open' };
+
+  // Staff can only view their own orders; admin/manager can view all or filter by staff.
+  if (req.user.role === 'staff') {
+    filter.staff = req.user._id;
+  } else if (staff) {
+    filter.staff = staff;
+  }
+
+  if (from || to) {
+    filter.createdAt = {};
+    if (from) filter.createdAt.$gte = new Date(from);
+    if (to) filter.createdAt.$lte = new Date(to);
+  }
+
+  if (search) {
+    const asNumber = Number(search);
+    if (!Number.isNaN(asNumber)) filter.orderNumber = asNumber;
+  }
+
+  const orders = await Order.find(filter)
+    .populate('customer', 'name phone')
+    .populate('staff', 'name role')
+    .populate('table', 'name')
+    .sort({ createdAt: -1 })
+    .skip((page - 1) * limit)
+    .limit(limit);
+
+  const total = await Order.countDocuments(filter);
+
+  res.json({
+    success: true,
+    data: orders,
+    pagination: { page, limit, total, pages: Math.ceil(total / limit) },
+  });
+});
+
+const getOrder = asyncHandler(async (req, res) => {
+  const filter = { _id: req.params.id };
+  if (req.user.role === 'staff') filter.staff = req.user._id;
+
+  const order = await Order.findOne(filter).populate('customer', 'name phone').populate('staff', 'name role').populate('table', 'name');
+  if (!order) throw new ApiError(404, 'Order not found.');
+
+  res.json({ success: true, data: order });
+});
+
+// POST /api/orders/:id/void  (admin only)
+// Reverses inventory and credit effects of a completed order.
+const voidOrder = asyncHandler(async (req, res) => {
+  const { reason } = req.body;
+
+  const session = await mongoose.startSession();
+  let voided;
+
+  try {
+    await session.withTransaction(async () => {
+      const order = await Order.findById(req.params.id).session(session);
+      if (!order) throw new ApiError(404, 'Order not found.');
+      if (order.status === 'voided') throw new ApiError(409, 'Order is already voided.');
+      if (order.status === 'open') throw new ApiError(409, 'This order has not been billed yet - cancel it instead of voiding.');
+
+      // Restock inventory
+      for (const line of order.items) {
+        const product = await Product.findById(line.product).session(session);
+        if (product && product.trackInventory) {
+          product.stock += line.quantity;
+          await product.save({ session });
+
+          await InventoryTransaction.create(
+            [
+              {
+                product: product._id,
+                type: 'VOID_RESTOCK',
+                quantity: line.quantity,
+                stockAfter: product.stock,
+                reason: `Void of bill #${order.orderNumber}`,
+                order: order._id,
+                recordedBy: req.user._id,
+              },
+            ],
+            { session }
+          );
+        }
+      }
+
+      // Reverse credit ledger effect
+      if (order.customer && order.paymentBreakdown.credit > 0) {
+        const customer = await Customer.findById(order.customer).session(session);
+        if (customer) {
+          customer.outstandingBalance = round2(customer.outstandingBalance - order.paymentBreakdown.credit);
+          customer.totalPurchases = round2(customer.totalPurchases - order.grandTotal);
+          await customer.save({ session });
+
+          await CreditTransaction.create(
+            [
+              {
+                customer: customer._id,
+                type: 'PAID',
+                amount: order.paymentBreakdown.credit,
+                method: 'ORDER',
+                order: order._id,
+                balanceAfter: customer.outstandingBalance,
+                note: `Reversal - void of bill #${order.orderNumber}`,
+                recordedBy: req.user._id,
+              },
+            ],
+            { session }
+          );
+        }
+      }
+
+      order.status = 'voided';
+      order.voidedAt = new Date();
+      order.voidedBy = req.user._id;
+      order.voidReason = reason;
+      await order.save({ session });
+
+      voided = order;
+    });
+  } finally {
+    session.endSession();
+  }
+
+  res.json({ success: true, message: 'Order voided.', data: voided });
+});
+
+module.exports = {
+  createOrder,
+  startTableOrder,
+  updateOpenOrderItems,
+  checkoutOrder,
+  cancelOpenOrder,
+  reassignAttendee,
+  listOrders,
+  getOrder,
+  voidOrder,
+};
