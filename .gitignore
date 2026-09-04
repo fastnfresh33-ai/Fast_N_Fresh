@@ -1,23 +1,38 @@
-# Secrets
+# =========================
+# SECRETS - NEVER COMMIT
+# =========================
 .env
 .env.*
 !.env.example
+*.pem
+*.key
+*.p12
+*.jks
+google-services.json
+GoogleService-Info.plist
 
-# Flutter / Dart
+# =========================
+# BACKEND
+# =========================
+backend/node_modules/
+backend/.env
+
+# =========================
+# FLUTTER
+# =========================
 mobile/.dart_tool/
 mobile/build/
 mobile/.flutter-plugins
 mobile/.flutter-plugins-dependencies
 mobile/.packages
+mobile/.pub-cache/
+mobile/android/.gradle/
+mobile/android/local.properties
 
-# Backend dependencies
-backend/node_modules/
-
-# Git / OS / editor
-.git/
-.DS_Store
+# =========================
+# IDE / OS
+# =========================
 .vscode/
-
-# Keep only the web menu for GitHub
-backend/
-mobile/
+.idea/
+.DS_Store
+Thumbs.db
