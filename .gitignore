@@ -88,4 +88,3 @@ coverage/
 
 # ---------- Misc ----------
 *.class
-!backend/.env.example
