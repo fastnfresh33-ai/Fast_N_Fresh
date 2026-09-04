@@ -1,0 +1,111 @@
+plugins {
+    id "com.android.application"
+    id "kotlin-android"
+    id "dev.flutter.flutter-gradle-plugin"
+    id "com.google.gms.google-services"
+}
+
+def localProperties = new Properties()
+def localPropertiesFile = rootProject.file("local.properties")
+if (localPropertiesFile.exists()) {
+    localPropertiesFile.withReader("UTF-8") { reader ->
+        localProperties.load(reader)
+    }
+}
+
+def flutterVersionCode = localProperties.getProperty("flutter.versionCode")
+if (flutterVersionCode == null) {
+    flutterVersionCode = "1"
+}
+
+def flutterVersionName = localProperties.getProperty("flutter.versionName")
+if (flutterVersionName == null) {
+    flutterVersionName = "1.0.0"
+}
+
+// Release signing: loaded from android/key.properties, which is git-ignored
+// and must never be committed. See mobile/README.md for the
+// format and how to generate the upload keystore with
+// keytool. Using the same keystore for every release is required so future
+// APK updates can be installed over the existing one on cafe devices.
+def keystorePropertiesFile = rootProject.file("key.properties")
+def keystoreProperties = new Properties()
+def hasReleaseKeystore = keystorePropertiesFile.exists()
+if (hasReleaseKeystore) {
+    keystorePropertiesFile.withReader("UTF-8") { reader ->
+        keystoreProperties.load(reader)
+    }
+}
+
+android {
+    namespace = "com.fastnfresh.cafe"
+    compileSdk = flutter.compileSdkVersion
+    ndkVersion = flutter.ndkVersion
+
+    compileOptions {
+        sourceCompatibility = JavaVersion.VERSION_11
+        targetCompatibility = JavaVersion.VERSION_11
+        coreLibraryDesugaringEnabled true
+    }
+
+    kotlinOptions {
+        jvmTarget = JavaVersion.VERSION_11.toString()
+    }
+
+    defaultConfig {
+        // Fast N Fresh Cafe — unique application id for the Play Store / device install.
+        applicationId = "com.fastnfresh.cafe"
+        minSdkVersion = flutter.minSdkVersion
+        targetSdk = flutter.targetSdkVersion
+        versionCode = flutterVersionCode.toInteger()
+        versionName = flutterVersionName
+    }
+
+    signingConfigs {
+        if (hasReleaseKeystore) {
+            release {
+                keyAlias = keystoreProperties["keyAlias"]
+                keyPassword = keystoreProperties["keyPassword"]
+                storeFile = keystoreProperties["storeFile"] != null
+                    ? rootProject.file(keystoreProperties["storeFile"])
+                    : null
+                storePassword = keystoreProperties["storePassword"]
+            }
+        }
+    }
+
+    buildTypes {
+        release {
+            // CRITICAL: production releases must NEVER be signed with the
+            // debug key. If android/key.properties is missing (no real
+            // upload keystore configured yet), fail the release build loudly
+            // instead of silently falling back to debug signing — see
+            // mobile/README.md for how to generate the keystore.
+            if (hasReleaseKeystore) {
+                signingConfig = signingConfigs.release
+            } else {
+                throw new GradleException(
+                    "Missing android/key.properties — a release build requires a real " +
+                    "upload keystore. See mobile/README.md ('Release signing') for the " +
+                    "keytool command to generate one. Refusing to sign the release build " +
+                    "with the debug key."
+                )
+            }
+            minifyEnabled = true
+            shrinkResources = true
+            proguardFiles getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro"
+        }
+
+        debug {
+            applicationIdSuffix = ".debug"
+        }
+    }
+}
+
+dependencies {
+    coreLibraryDesugaring "com.android.tools:desugar_jdk_libs:2.1.5"
+}
+
+flutter {
+    source = "../.."
+}
