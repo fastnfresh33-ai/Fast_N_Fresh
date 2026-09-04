@@ -862,6 +862,18 @@ textarea:focus-visible {
  .upi-pay-btn {
   width: 100%;
   margin-top: 10px;
+  min-height: 50px;
+  background: linear-gradient(135deg, var(--primary), var(--primary-dark));
+  border-color: var(--primary);
+  color: #ffffff;
+  font-size: 14px;
+  font-weight: 800;
+}
+
+.upi-pay-btn:disabled {
+  background: #bfc7c3;
+  border-color: #bfc7c3;
+  color: #ffffff;
 }
 
 /* =========================================================

@@ -65,7 +65,10 @@
     customerName: document.getElementById('customerName'),
     customerPhone: document.getElementById('customerPhone'),
     orderNote: document.getElementById('orderNote'),
-     onlinePaymentOption: document.getElementById('onlinePaymentOption'),
+    onlinePaymentOption: document.getElementById('onlinePaymentOption'),
+    payUpiBtn: document.getElementById('payUpiBtn'),
+    upiReferenceGroup: document.getElementById('upiReferenceGroup'),
+    upiReferenceInput: document.getElementById('upiReferenceInput'),
 
     checkoutError: document.getElementById('checkoutError'),
     placeOrderBtn: document.getElementById('placeOrderBtn'),
@@ -1386,16 +1389,17 @@
     const selected = document.querySelector('input[name="paymentMethod"]:checked');
     const isUpi = selected?.value === 'upi';
     if (els.payUpiBtn) {
-      // Keep the separate Pay UPI action for compatibility, but the primary
-      // Place Order button now starts UPI too.
       els.payUpiBtn.classList.toggle('hidden', !isUpi);
-      els.payUpiBtn.disabled = state.cart.size === 0;
+      els.payUpiBtn.disabled = state.cart.size === 0 || (isUpi && state.pendingUpiReady);
+      els.payUpiBtn.textContent = state.pendingUpiReady ? 'UPI PAYMENT STARTED' : 'PAY WITH UPI';
     }
     if (els.upiReferenceGroup) {
       els.upiReferenceGroup.classList.toggle('hidden', !isUpi || !state.pendingUpiReady);
     }
-    if (els.placeOrderBtn && !(isUpi && state.pendingUpiReady)) {
-      els.placeOrderBtn.textContent = isUpi ? 'Pay & Place Order' : 'Place Order';
+    if (els.placeOrderBtn) {
+      els.placeOrderBtn.textContent = isUpi
+        ? (state.pendingUpiReady ? 'PLACE ORDER' : 'PLACE ORDER AFTER UPI')
+        : 'PLACE ORDER';
     }
   }
 
