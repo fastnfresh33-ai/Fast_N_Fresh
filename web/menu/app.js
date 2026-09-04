@@ -1191,8 +1191,9 @@
     };
 
     if (paymentMethod === 'UPI' && !state.pendingUpiReady) {
-      els.checkoutError.textContent = 'Tap “Pay UPI” first. After you return from your UPI app, press “Place Order” to submit the order.';
-      els.checkoutError.classList.remove('hidden');
+      // The main Place Order button also starts UPI checkout. This keeps the
+      // customer flow simple: select UPI -> tap Place Order -> choose a UPI app.
+      await startUpiPayment();
       return;
     }
 
@@ -1359,13 +1360,20 @@
   }
 
   function updatePaymentActions() {
-    if (!els.payUpiBtn) return;
     const selected = document.querySelector('input[name="paymentMethod"]:checked');
     const isUpi = selected?.value === 'upi';
-    els.payUpiBtn.classList.toggle('hidden', !isUpi);
-    els.payUpiBtn.disabled = state.cart.size === 0;
-    if (els.upiReferenceGroup) els.upiReferenceGroup.classList.toggle('hidden', !isUpi || !state.pendingUpiReady);
-
+    if (els.payUpiBtn) {
+      // Keep the separate Pay UPI action for compatibility, but the primary
+      // Place Order button now starts UPI too.
+      els.payUpiBtn.classList.toggle('hidden', !isUpi);
+      els.payUpiBtn.disabled = state.cart.size === 0;
+    }
+    if (els.upiReferenceGroup) {
+      els.upiReferenceGroup.classList.toggle('hidden', !isUpi || !state.pendingUpiReady);
+    }
+    if (els.placeOrderBtn && !(isUpi && state.pendingUpiReady)) {
+      els.placeOrderBtn.textContent = isUpi ? 'Pay & Place Order' : 'Place Order';
+    }
   }
 
   /* =========================================================
