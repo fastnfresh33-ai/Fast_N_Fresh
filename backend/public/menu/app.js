@@ -72,6 +72,10 @@
 
     checkoutError: document.getElementById('checkoutError'),
     placeOrderBtn: document.getElementById('placeOrderBtn'),
+
+    upiAppOverlay: document.getElementById('upiAppOverlay'),
+    closeUpiAppOverlay: document.getElementById('closeUpiAppOverlay'),
+    upiAppGrid: document.getElementById('upiAppGrid'),
   };
 
   const state = {
@@ -100,6 +104,10 @@
     // Set only after returning from the external UPI app. Returning alone
     // never submits an order; the customer must press Place Order.
     pendingUpiReady: false,
+    // The UPI query string (pa=...&pn=...&am=... etc, without the scheme)
+    // built for the current checkout attempt, reused for whichever app the
+    // customer picks in the UPI app picker.
+    pendingUpiQuery: '',
   };
 
   function generateRequestId() {
@@ -1271,11 +1279,11 @@
       }));
     } catch (_) {}
 
-    // Build a standard UPI deep link. `tr` ties the payment attempt to this
-    // cart/order request while the UTR entered after payment remains the
-    // actual proof recorded with the order.
-    const upiUrl = [
-      'upi://pay',
+    // Build the standard UPI query string. `tr` ties the payment attempt to
+    // this cart/order request while the UTR entered after payment remains
+    // the actual proof recorded with the order. This same query string is
+    // reused for whichever specific app the customer picks below.
+    state.pendingUpiQuery = [
       `pa=${encodeURIComponent(upiId)}`,
       `pn=${encodeURIComponent(state.paymentOptions.cafeName || 'FAST N FRESH CAFE')}`,
       `am=${encodeURIComponent(total.toFixed(2))}`,
@@ -1285,6 +1293,42 @@
       'mode=02',
       'purpose=00',
     ].join('&');
+
+    // Let the customer pick which UPI app to pay with instead of guessing;
+    // the actual app launch happens in launchUpiApp() once they choose.
+    openUpiAppPicker();
+
+    // External UPI navigation never creates the order. The customer must
+    // return and explicitly press Place Order after entering the UTR.
+  }
+
+  // Scheme prefixes for each UPI app option. "other" uses the generic
+  // upi://pay scheme, which on Android hands off to the OS chooser for any
+  // installed UPI app not listed explicitly above.
+  const UPI_APP_SCHEMES = {
+    gpay: 'tez://upi/pay',
+    phonepe: 'phonepe://pay',
+    paytm: 'paytmmp://pay',
+    bhim: 'bhim://pay',
+    other: 'upi://pay',
+  };
+
+  function openUpiAppPicker() {
+    if (!els.upiAppOverlay) return;
+    els.upiAppOverlay.classList.remove('hidden');
+    document.body.style.overflow = 'hidden';
+  }
+
+  function closeUpiAppPicker() {
+    if (!els.upiAppOverlay) return;
+    els.upiAppOverlay.classList.add('hidden');
+    document.body.style.overflow = '';
+  }
+
+  function launchUpiApp(appKey) {
+    const scheme = UPI_APP_SCHEMES[appKey] || UPI_APP_SCHEMES.other;
+    if (!state.pendingUpiQuery) return;
+    const upiUrl = `${scheme}?${state.pendingUpiQuery}`;
 
     // Use a real user-gesture anchor instead of assigning window.location.
     // This is more reliable in Android Chrome/PWA browsers for handing the
@@ -1297,8 +1341,7 @@
     upiLink.click();
     window.setTimeout(() => upiLink.remove(), 1500);
 
-    // External UPI navigation never creates the order. The customer must
-    // return and explicitly press Place Order after entering the UTR.
+    closeUpiAppPicker();
   }
 
   async function submitCreatedOrder(payload) {
@@ -1493,6 +1536,24 @@
 
   if (els.payUpiBtn) {
     els.payUpiBtn.addEventListener('click', startUpiPayment);
+  }
+
+  if (els.closeUpiAppOverlay) {
+    els.closeUpiAppOverlay.addEventListener('click', closeUpiAppPicker);
+  }
+
+  if (els.upiAppOverlay) {
+    els.upiAppOverlay.addEventListener('click', (event) => {
+      if (event.target === els.upiAppOverlay) closeUpiAppPicker();
+    });
+  }
+
+  if (els.upiAppGrid) {
+    els.upiAppGrid.addEventListener('click', (event) => {
+      const button = event.target.closest('[data-upi-app]');
+      if (!button) return;
+      launchUpiApp(button.getAttribute('data-upi-app'));
+    });
   }
 
   document.querySelectorAll('input[name="paymentMethod"]').forEach((input) => {
