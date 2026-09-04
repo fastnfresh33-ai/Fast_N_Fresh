@@ -1268,11 +1268,34 @@
       }));
     } catch (_) {}
 
-    const upiUrl = `upi://pay?pa=${encodeURIComponent(upiId)}&pn=${encodeURIComponent(state.paymentOptions.cafeName || 'FAST N FRESH CAFE')}&am=${encodeURIComponent(total.toFixed(2))}&cu=INR&tn=${encodeURIComponent(`Order for Table ${state.tableNumber}`)}`;
+    // Build a standard UPI deep link. `tr` ties the payment attempt to this
+    // cart/order request while the UTR entered after payment remains the
+    // actual proof recorded with the order.
+    const upiUrl = [
+      'upi://pay',
+      `pa=${encodeURIComponent(upiId)}`,
+      `pn=${encodeURIComponent(state.paymentOptions.cafeName || 'FAST N FRESH CAFE')}`,
+      `am=${encodeURIComponent(total.toFixed(2))}`,
+      'cu=INR',
+      `tr=${encodeURIComponent(state.clientRequestId)}`,
+      `tn=${encodeURIComponent(`Order for Table ${state.tableNumber}`)}`,
+      'mode=02',
+      'purpose=00',
+    ].join('&');
+
+    // Use a real user-gesture anchor instead of assigning window.location.
+    // This is more reliable in Android Chrome/PWA browsers for handing the
+    // UPI URI to installed apps such as GPay, PhonePe and Paytm.
+    const upiLink = document.createElement('a');
+    upiLink.href = upiUrl;
+    upiLink.setAttribute('aria-hidden', 'true');
+    upiLink.style.display = 'none';
+    document.body.appendChild(upiLink);
+    upiLink.click();
+    window.setTimeout(() => upiLink.remove(), 1500);
 
     // External UPI navigation never creates the order. The customer must
-    // return and explicitly press Place Order.
-    window.location.href = upiUrl;
+    // return and explicitly press Place Order after entering the UTR.
   }
 
   async function submitCreatedOrder(payload) {

@@ -192,6 +192,8 @@
     }
 
     let response;
+    const controller = new AbortController();
+    const timeoutId = window.setTimeout(() => controller.abort(), 15000);
 
     try {
       response = await fetch(
@@ -201,12 +203,20 @@
             'Content-Type': 'application/json',
           },
           ...options,
+          signal: controller.signal,
         }
       );
     } catch (error) {
+      if (error?.name === 'AbortError') {
+        throw new Error(
+          'Cafe server took too long to respond. Please try again.'
+        );
+      }
       throw new Error(
         'Network error. Please check your internet connection.'
       );
+    } finally {
+      window.clearTimeout(timeoutId);
     }
 
     let body;
@@ -382,9 +392,6 @@
   async function init() {
     showState('loadingState');
 
-    const restored = await tryRestorePendingOrder();
-    if (restored) return;
-
     const tableNumber =
       getTableNumberFromUrl();
 
@@ -433,8 +440,13 @@
 
       renderApp();
 
+      // Always show the menu first. An old/stale order-status request must
+      // never block the customer from seeing the menu.
       showState('app');
       setTimeout(maybeResumePendingUpiPayment, 350);
+
+      const restored = await tryRestorePendingOrder();
+      if (restored) return;
     } catch (error) {
       showFatalError(
         'Unable to load menu',
@@ -1179,8 +1191,9 @@
     };
 
     if (paymentMethod === 'UPI' && !state.pendingUpiReady) {
-      els.checkoutError.textContent = 'Tap “Pay UPI” first. After you return from your UPI app, press “Place Order” to submit the order.';
-      els.checkoutError.classList.remove('hidden');
+      // The main Place Order button also starts UPI checkout. This keeps the
+      // customer flow simple: select UPI -> tap Place Order -> choose a UPI app.
+      await startUpiPayment();
       return;
     }
 
@@ -1255,11 +1268,34 @@
       }));
     } catch (_) {}
 
-    const upiUrl = `upi://pay?pa=${encodeURIComponent(upiId)}&pn=${encodeURIComponent(state.paymentOptions.cafeName || 'FAST N FRESH CAFE')}&am=${encodeURIComponent(total.toFixed(2))}&cu=INR&tn=${encodeURIComponent(`Order for Table ${state.tableNumber}`)}`;
+    // Build a standard UPI deep link. `tr` ties the payment attempt to this
+    // cart/order request while the UTR entered after payment remains the
+    // actual proof recorded with the order.
+    const upiUrl = [
+      'upi://pay',
+      `pa=${encodeURIComponent(upiId)}`,
+      `pn=${encodeURIComponent(state.paymentOptions.cafeName || 'FAST N FRESH CAFE')}`,
+      `am=${encodeURIComponent(total.toFixed(2))}`,
+      'cu=INR',
+      `tr=${encodeURIComponent(state.clientRequestId)}`,
+      `tn=${encodeURIComponent(`Order for Table ${state.tableNumber}`)}`,
+      'mode=02',
+      'purpose=00',
+    ].join('&');
+
+    // Use a real user-gesture anchor instead of assigning window.location.
+    // This is more reliable in Android Chrome/PWA browsers for handing the
+    // UPI URI to installed apps such as GPay, PhonePe and Paytm.
+    const upiLink = document.createElement('a');
+    upiLink.href = upiUrl;
+    upiLink.setAttribute('aria-hidden', 'true');
+    upiLink.style.display = 'none';
+    document.body.appendChild(upiLink);
+    upiLink.click();
+    window.setTimeout(() => upiLink.remove(), 1500);
 
     // External UPI navigation never creates the order. The customer must
-    // return and explicitly press Place Order.
-    window.location.href = upiUrl;
+    // return and explicitly press Place Order after entering the UTR.
   }
 
   async function submitCreatedOrder(payload) {
@@ -1347,13 +1383,20 @@
   }
 
   function updatePaymentActions() {
-    if (!els.payUpiBtn) return;
     const selected = document.querySelector('input[name="paymentMethod"]:checked');
     const isUpi = selected?.value === 'upi';
-    els.payUpiBtn.classList.toggle('hidden', !isUpi);
-    els.payUpiBtn.disabled = state.cart.size === 0;
-    if (els.upiReferenceGroup) els.upiReferenceGroup.classList.toggle('hidden', !isUpi || !state.pendingUpiReady);
-
+    if (els.payUpiBtn) {
+      // Keep the separate Pay UPI action for compatibility, but the primary
+      // Place Order button now starts UPI too.
+      els.payUpiBtn.classList.toggle('hidden', !isUpi);
+      els.payUpiBtn.disabled = state.cart.size === 0;
+    }
+    if (els.upiReferenceGroup) {
+      els.upiReferenceGroup.classList.toggle('hidden', !isUpi || !state.pendingUpiReady);
+    }
+    if (els.placeOrderBtn && !(isUpi && state.pendingUpiReady)) {
+      els.placeOrderBtn.textContent = isUpi ? 'Pay & Place Order' : 'Place Order';
+    }
   }
 
   /* =========================================================

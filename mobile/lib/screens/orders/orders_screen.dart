@@ -51,6 +51,75 @@ class _OrdersScreenState extends State<OrdersScreen>
   String? _filterPayment;
   String? _filterOrderType;
 
+  /*
+   * Only used when _filterRange == 'Custom'. Selected via a date-range
+   * picker inside the filter sheet.
+   */
+  DateTime? _customFrom;
+  DateTime? _customTo;
+
+  static const List<String> _dateRangeOptions = [
+    'Today',
+    'Yesterday',
+    'This Week',
+    'This Month',
+    'Custom',
+    'All',
+  ];
+
+  /*
+   * Existing payment methods supported by the backend (Order.paymentMethod
+   * enum: CASH | UPI | CREDIT | MIXED). Kept in one place so the filter
+   * sheet always reflects every payment type the app actually supports,
+   * instead of a hand-picked subset.
+   */
+  static const List<String> _paymentMethodOptions = [
+    'CASH',
+    'UPI',
+    'CREDIT',
+    'MIXED',
+  ];
+
+  static const List<String> _orderTypeOptions = [
+    'dine_in',
+    'takeaway',
+    'delivery',
+  ];
+
+  String _orderTypeLabel(String type) {
+    switch (type) {
+      case 'dine_in':
+        return 'Dine-In';
+      case 'takeaway':
+        return 'Takeaway';
+      case 'delivery':
+        return 'Delivery';
+      default:
+        return type;
+    }
+  }
+
+  String get _dateRangeSummary {
+    if (_filterRange == 'Custom' &&
+        _customFrom != null &&
+        _customTo != null) {
+      return '${Formatters.shortDate(_customFrom!)} – '
+          '${Formatters.shortDate(_customTo!)}';
+    }
+
+    return _filterRange;
+  }
+
+  int get _activeFilterCount {
+    var count = 0;
+
+    if (_filterRange != 'Today') count++;
+    if (_filterPayment != null) count++;
+    if (_filterOrderType != null) count++;
+
+    return count;
+  }
+
   AppLifecycleState? _lastLifecycleState;
 
   ConnectivityProvider? _connectivity;
@@ -313,6 +382,14 @@ class _OrdersScreenState extends State<OrdersScreen>
           1,
         );
 
+      case 'Custom':
+        if (_customFrom == null) return null;
+        return DateTime(
+          _customFrom!.year,
+          _customFrom!.month,
+          _customFrom!.day,
+        );
+
       default:
         return null;
     }
@@ -326,6 +403,17 @@ class _OrdersScreenState extends State<OrdersScreen>
         now.year,
         now.month,
         now.day - 1,
+        23,
+        59,
+        59,
+      );
+    }
+
+    if (_filterRange == 'Custom' && _customTo != null) {
+      return DateTime(
+        _customTo!.year,
+        _customTo!.month,
+        _customTo!.day,
         23,
         59,
         59,
@@ -581,194 +669,353 @@ class _OrdersScreenState extends State<OrdersScreen>
     );
   }
 
+  /*
+   * One clean "Filters" control instead of three separate chip rows.
+   * Tapping it opens a bottom sheet with Date/Period, Payment Type and
+   * Order Type selectors plus Apply/Clear actions. A compact summary is
+   * shown next to the button so the active filters stay visible without
+   * cluttering the screen.
+   */
   Widget _buildFilters() {
-    return Column(
-      children: [
-        SizedBox(
-          height: 42,
-          child: ListView(
-            scrollDirection: Axis.horizontal,
-            padding: const EdgeInsets.symmetric(
-              horizontal: 16,
-              vertical: 4,
-            ),
-            children: [
-              'Today',
-              'Yesterday',
-              'This Week',
-              'This Month',
-              'All',
-            ].map((label) {
-              final selected =
-                  _filterRange == label;
+    final hasActiveFilters = _activeFilterCount > 0;
 
-              return Padding(
-                padding:
-                    const EdgeInsets.only(right: 8),
-                child: ChoiceChip(
-                  label: Text(label),
-                  selected: selected,
-                  onSelected: (_) {
-                    setState(() {
-                      _filterRange = label;
-                    });
-
-                    _load();
-                  },
-                  labelStyle: TextStyle(
-                    color: selected
-                        ? Colors.white
-                        : AppColors.textPrimary,
-                    fontSize: 12,
-                    fontWeight: FontWeight.w600,
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 10, 16, 10),
+      child: Row(
+        children: [
+          Expanded(
+            child: InkWell(
+              onTap: _openFilterSheet,
+              borderRadius: BorderRadius.circular(12),
+              child: Container(
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 14,
+                  vertical: 11,
+                ),
+                decoration: BoxDecoration(
+                  color: AppColors.surface,
+                  borderRadius: BorderRadius.circular(12),
+                  border: Border.all(
+                    color: hasActiveFilters
+                        ? AppColors.primary
+                        : AppColors.border,
                   ),
-                  selectedColor:
-                      AppColors.primary,
-                  backgroundColor:
-                      AppColors.surface,
-                  shape: RoundedRectangleBorder(
-                    borderRadius:
-                        BorderRadius.circular(20),
-                    side: BorderSide(
-                      color: AppColors.border,
+                ),
+                child: Row(
+                  children: [
+                    Icon(
+                      Icons.filter_list,
+                      size: 20,
+                      color: hasActiveFilters
+                          ? AppColors.primary
+                          : AppColors.textSecondary,
+                    ),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: Text(
+                        hasActiveFilters
+                            ? '$_dateRangeSummary'
+                                '${_filterPayment != null ? ' · $_filterPayment' : ''}'
+                                '${_filterOrderType != null ? ' · ${_orderTypeLabel(_filterOrderType!)}' : ''}'
+                            : 'Filters',
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(
+                          fontSize: 13.5,
+                          fontWeight: FontWeight.w600,
+                          color: hasActiveFilters
+                              ? AppColors.textPrimary
+                              : AppColors.textSecondary,
+                        ),
+                      ),
+                    ),
+                    if (hasActiveFilters)
+                      Container(
+                        margin: const EdgeInsets.only(left: 6),
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 7,
+                          vertical: 2,
+                        ),
+                        decoration: BoxDecoration(
+                          color: AppColors.primary,
+                          borderRadius: BorderRadius.circular(10),
+                        ),
+                        child: Text(
+                          '$_activeFilterCount',
+                          style: const TextStyle(
+                            color: Colors.white,
+                            fontSize: 11,
+                            fontWeight: FontWeight.w700,
+                          ),
+                        ),
+                      ),
+                    const SizedBox(width: 2),
+                    Icon(
+                      Icons.keyboard_arrow_down,
+                      size: 18,
+                      color: AppColors.textMuted,
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ),
+          if (hasActiveFilters) ...[
+            const SizedBox(width: 8),
+            IconButton(
+              tooltip: 'Clear Filters',
+              onPressed: () {
+                setState(() {
+                  _filterRange = 'Today';
+                  _filterPayment = null;
+                  _filterOrderType = null;
+                  _customFrom = null;
+                  _customTo = null;
+                });
+                _load();
+              },
+              icon: Icon(
+                Icons.close,
+                size: 20,
+                color: AppColors.textSecondary,
+              ),
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+
+  Future<void> _openFilterSheet() async {
+    // Local, uncommitted copies so changes only take effect on "Apply".
+    var pendingRange = _filterRange;
+    var pendingPayment = _filterPayment;
+    var pendingOrderType = _filterOrderType;
+    var pendingFrom = _customFrom;
+    var pendingTo = _customTo;
+
+    await showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: AppColors.surface,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (sheetContext) {
+        return StatefulBuilder(
+          builder: (sheetContext, setSheetState) {
+            Future<void> pickCustomRange() async {
+              final now = DateTime.now();
+              final picked = await showDateRangePicker(
+                context: sheetContext,
+                firstDate: DateTime(now.year - 2),
+                lastDate: now,
+                initialDateRange: (pendingFrom != null && pendingTo != null)
+                    ? DateTimeRange(start: pendingFrom!, end: pendingTo!)
+                    : DateTimeRange(start: now, end: now),
+              );
+
+              if (picked != null) {
+                setSheetState(() {
+                  pendingRange = 'Custom';
+                  pendingFrom = picked.start;
+                  pendingTo = picked.end;
+                });
+              }
+            }
+
+            return Padding(
+              padding: EdgeInsets.only(
+                left: 20,
+                right: 20,
+                top: 18,
+                bottom: MediaQuery.of(sheetContext).viewInsets.bottom + 18,
+              ),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      Text(
+                        'Filters',
+                        style: TextStyle(
+                          fontSize: 18,
+                          fontWeight: FontWeight.w700,
+                          color: AppColors.textPrimary,
+                        ),
+                      ),
+                      TextButton(
+                        onPressed: () {
+                          setSheetState(() {
+                            pendingRange = 'Today';
+                            pendingPayment = null;
+                            pendingOrderType = null;
+                            pendingFrom = null;
+                            pendingTo = null;
+                          });
+                        },
+                        child: const Text('Clear Filters'),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 12),
+                  Text(
+                    'Date / Period',
+                    style: TextStyle(
+                      fontSize: 12.5,
+                      fontWeight: FontWeight.w600,
+                      color: AppColors.textSecondary,
                     ),
                   ),
-                ),
-              );
-            }).toList(),
-          ),
-        ),
-        SizedBox(
-          height: 40,
-          child: ListView(
-            scrollDirection: Axis.horizontal,
-            padding:
-                const EdgeInsets.symmetric(
-              horizontal: 16,
-            ),
-            children: [
-              null,
-              'CASH',
-              'UPI',
-              'CREDIT',
-            ].map((method) {
-              final selected =
-                  _filterPayment == method;
+                  const SizedBox(height: 6),
+                  DropdownButtonFormField<String>(
+                    value: pendingRange,
+                    isExpanded: true,
+                    decoration: InputDecoration(
+                      contentPadding: const EdgeInsets.symmetric(
+                        horizontal: 12,
+                        vertical: 10,
+                      ),
+                      border: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(10),
+                        borderSide: BorderSide(color: AppColors.border),
+                      ),
+                    ),
+                    items: _dateRangeOptions.map((label) {
+                      return DropdownMenuItem(
+                        value: label,
+                        child: Text(
+                          label == 'Custom' &&
+                                  pendingFrom != null &&
+                                  pendingTo != null
+                              ? 'Custom: ${Formatters.shortDate(pendingFrom!)} – '
+                                  '${Formatters.shortDate(pendingTo!)}'
+                              : label,
+                        ),
+                      );
+                    }).toList(),
+                    onChanged: (value) async {
+                      if (value == null) return;
 
-              return Padding(
-                padding:
-                    const EdgeInsets.only(
-                  right: 8,
-                  bottom: 6,
-                ),
-                child: ChoiceChip(
-                  label: Text(
-                    method ?? 'All Payments',
-                  ),
-                  selected: selected,
-                  onSelected: (_) {
-                    setState(() {
-                      _filterPayment = method;
-                    });
+                      if (value == 'Custom') {
+                        await pickCustomRange();
+                        return;
+                      }
 
-                    _load();
-                  },
-                  labelStyle: TextStyle(
-                    color: selected
-                        ? Colors.white
-                        : AppColors.textSecondary,
-                    fontSize: 11.5,
-                    fontWeight:
-                        FontWeight.w600,
+                      setSheetState(() {
+                        pendingRange = value;
+                      });
+                    },
                   ),
-                  selectedColor:
-                      AppColors.textPrimary,
-                  backgroundColor:
-                      AppColors.background,
-                  visualDensity:
-                      VisualDensity.compact,
-                  shape:
-                      RoundedRectangleBorder(
-                    borderRadius:
-                        BorderRadius.circular(16),
-                    side: BorderSide(
-                      color: AppColors.border,
+                  const SizedBox(height: 18),
+                  Text(
+                    'Payment Type',
+                    style: TextStyle(
+                      fontSize: 12.5,
+                      fontWeight: FontWeight.w600,
+                      color: AppColors.textSecondary,
                     ),
                   ),
-                ),
-              );
-            }).toList(),
-          ),
-        ),
-        SizedBox(
-          height: 40,
-          child: ListView(
-            scrollDirection: Axis.horizontal,
-            padding:
-                const EdgeInsets.symmetric(
-              horizontal: 16,
-            ),
-            children: [
-              null,
-              'dine_in',
-              'takeaway',
-              'delivery',
-            ].map((type) {
-              final selected =
-                  _filterOrderType == type;
-
-              final label = type == null
-                  ? 'All Types'
-                  : type == 'dine_in'
-                      ? 'Dine-In'
-                      : type == 'takeaway'
-                          ? 'Takeaway'
-                          : 'Delivery';
-
-              return Padding(
-                padding:
-                    const EdgeInsets.only(
-                  right: 8,
-                  bottom: 6,
-                ),
-                child: ChoiceChip(
-                  label: Text(label),
-                  selected: selected,
-                  onSelected: (_) {
-                    setState(() {
-                      _filterOrderType = type;
-                    });
-
-                    _load();
-                  },
-                  labelStyle: TextStyle(
-                    color: selected
-                        ? Colors.white
-                        : AppColors.textSecondary,
-                    fontSize: 11.5,
-                    fontWeight:
-                        FontWeight.w600,
+                  const SizedBox(height: 6),
+                  DropdownButtonFormField<String?>(
+                    value: pendingPayment,
+                    isExpanded: true,
+                    decoration: InputDecoration(
+                      contentPadding: const EdgeInsets.symmetric(
+                        horizontal: 12,
+                        vertical: 10,
+                      ),
+                      border: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(10),
+                        borderSide: BorderSide(color: AppColors.border),
+                      ),
+                    ),
+                    items: [
+                      const DropdownMenuItem<String?>(
+                        value: null,
+                        child: Text('All Payment Types'),
+                      ),
+                      ..._paymentMethodOptions.map(
+                        (method) => DropdownMenuItem<String?>(
+                          value: method,
+                          child: Text(method),
+                        ),
+                      ),
+                    ],
+                    onChanged: (value) {
+                      setSheetState(() {
+                        pendingPayment = value;
+                      });
+                    },
                   ),
-                  selectedColor:
-                      AppColors.primary,
-                  backgroundColor:
-                      AppColors.background,
-                  visualDensity:
-                      VisualDensity.compact,
-                  shape:
-                      RoundedRectangleBorder(
-                    borderRadius:
-                        BorderRadius.circular(16),
-                    side: BorderSide(
-                      color: AppColors.border,
+                  const SizedBox(height: 18),
+                  Text(
+                    'Order Type',
+                    style: TextStyle(
+                      fontSize: 12.5,
+                      fontWeight: FontWeight.w600,
+                      color: AppColors.textSecondary,
                     ),
                   ),
-                ),
-              );
-            }).toList(),
-          ),
-        ),
-      ],
+                  const SizedBox(height: 6),
+                  DropdownButtonFormField<String?>(
+                    value: pendingOrderType,
+                    isExpanded: true,
+                    decoration: InputDecoration(
+                      contentPadding: const EdgeInsets.symmetric(
+                        horizontal: 12,
+                        vertical: 10,
+                      ),
+                      border: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(10),
+                        borderSide: BorderSide(color: AppColors.border),
+                      ),
+                    ),
+                    items: [
+                      const DropdownMenuItem<String?>(
+                        value: null,
+                        child: Text('All Types'),
+                      ),
+                      ..._orderTypeOptions.map(
+                        (type) => DropdownMenuItem<String?>(
+                          value: type,
+                          child: Text(_orderTypeLabel(type)),
+                        ),
+                      ),
+                    ],
+                    onChanged: (value) {
+                      setSheetState(() {
+                        pendingOrderType = value;
+                      });
+                    },
+                  ),
+                  const SizedBox(height: 22),
+                  SizedBox(
+                    width: double.infinity,
+                    child: ElevatedButton(
+                      onPressed: () {
+                        Navigator.of(sheetContext).pop();
+
+                        setState(() {
+                          _filterRange = pendingRange;
+                          _filterPayment = pendingPayment;
+                          _filterOrderType = pendingOrderType;
+                          _customFrom = pendingFrom;
+                          _customTo = pendingTo;
+                        });
+
+                        _load();
+                      },
+                      child: const Text('Apply Filters'),
+                    ),
+                  ),
+                ],
+              ),
+            );
+          },
+        );
+      },
     );
   }
 }

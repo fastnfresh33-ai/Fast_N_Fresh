@@ -75,8 +75,8 @@ class _BillSuccessScreenState extends State<BillSuccessScreen> {
                 Expanded(
                   child: OutlinedButton.icon(
                     onPressed: _busy ? null : () => _runAction(() => _receiptService.printReceipt(order, _settings)),
-                    icon: Icon(Icons.print, size: 18),
-                    label: Text('Print'),
+                    icon: Icon(Icons.print, size: 20),
+                    label: Text('Print Receipt'),
                   ),
                 ),
                 SizedBox(width: 10),

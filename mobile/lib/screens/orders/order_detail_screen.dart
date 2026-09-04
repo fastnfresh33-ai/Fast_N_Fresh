@@ -278,9 +278,9 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> with WidgetsBindi
         ),
         actions: [
           if (_order != null && _order!.status == 'completed') ...[
-            IconButton(
-              icon: Icon(Icons.print, size: 20),
-              tooltip: 'Print',
+            TextButton.icon(
+              icon: Icon(Icons.print, size: 22),
+              label: const Text('Print'),
               onPressed: _busy
                   ? null
                   : () => _runReceiptAction(
