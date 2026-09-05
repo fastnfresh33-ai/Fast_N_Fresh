@@ -65,7 +65,30 @@ const orderSchema = new mongoose.Schema(
     paymentMethod: { type: String, enum: ['CASH', 'UPI', 'CREDIT', 'MIXED'] },
     // Payment state is deliberately separate from kitchen/order state.
     // QR orders begin pending and become paid only at trusted staff checkout.
-    paymentStatus: { type: String, enum: ['pending', 'paid', 'failed', 'cancelled'], default: 'pending', index: true },
+    //   pending            - CASH (pay-at-counter) order, or not yet started.
+    //   payment_initiated  - customer tapped "Pay with UPI" and was handed
+    //                        off to a UPI app. NOT proof of payment — only
+    //                        that an attempt started. Set the moment the
+    //                        order is created for paymentMethod=UPI.
+    //   paid               - verified paid. Only ever set by an authenticated
+    //                        staff member at checkout (see orderController),
+    //                        after they've confirmed the money actually
+    //                        arrived. Never set automatically from the
+    //                        public/customer-facing endpoints.
+    //   failed             - a payment attempt that is known not to have
+    //                        gone through (reserved for future PSP webhook
+    //                        integration; unused today).
+    //   cancelled          - customer or staff cancelled before payment.
+    paymentStatus: {
+      type: String,
+      enum: ['pending', 'payment_initiated', 'paid', 'failed', 'cancelled'],
+      default: 'pending',
+      index: true,
+    },
+    // Set when paymentStatus first becomes 'payment_initiated'. Lets staff
+    // see (and, if needed, clean up/cancel) UPI orders where the customer
+    // opened a UPI app but never returned to submit a reference.
+    paymentInitiatedAt: { type: Date },
     paymentBreakdown: {
       cash: { type: Number, default: 0 },
       upi: { type: Number, default: 0 },

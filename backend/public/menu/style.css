@@ -769,70 +769,6 @@ textarea:focus-visible {
 }
 
 /* =========================================================
-   UPI APP PICKER
-   ========================================================= */
-
-.upi-app-sheet {
-  max-height: 80vh;
-}
-
-.upi-app-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(84px, 1fr));
-
-  gap: 12px;
-
-  margin: 14px 0 18px;
-}
-
-.upi-app-option {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-
-  gap: 8px;
-
-  padding: 14px 6px;
-
-  border: 1px solid var(--border);
-  border-radius: var(--radius-medium);
-  background: var(--surface);
-
-  cursor: pointer;
-
-  transition: border-color 0.15s ease, transform 0.15s ease;
-}
-
-.upi-app-option:hover,
-.upi-app-option:active {
-  border-color: var(--primary);
-  transform: translateY(-1px);
-}
-
-.upi-app-icon {
-  width: 44px;
-  height: 44px;
-
-  display: flex;
-  align-items: center;
-  justify-content: center;
-
-  border-radius: 12px;
-
-  font-size: 16px;
-  font-weight: 800;
-}
-
-.upi-app-label {
-  font-size: 11.5px;
-  font-weight: 600;
-
-  color: var(--text-primary);
-
-  text-align: center;
-}
-
-/* =========================================================
    CART LINES
    ========================================================= */
 
@@ -1193,6 +1129,39 @@ textarea:focus-visible {
 
 .error-icon {
   background: #fff0f0;
+  color: var(--danger);
+}
+
+.pending-icon {
+  background: #fff6e0;
+  color: #b6790a;
+}
+
+.upi-pending-field-group {
+  width: 100%;
+  max-width: 320px;
+
+  margin-top: 18px;
+  text-align: left;
+}
+
+.text-btn {
+  margin-top: 16px;
+
+  padding: 8px 12px;
+
+  border: none;
+  background: transparent;
+
+  color: var(--text-muted);
+  font-size: 12.5px;
+  font-weight: 700;
+  text-decoration: underline;
+
+  cursor: pointer;
+}
+
+.danger-text-btn {
   color: var(--danger);
 }
 

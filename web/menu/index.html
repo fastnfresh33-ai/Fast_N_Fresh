@@ -446,6 +446,76 @@
 
   </div>
 
+  <!-- UPI app picker overlay -->
+  <div
+    class="overlay hidden"
+    id="upiAppOverlay"
+    role="dialog"
+    aria-modal="true"
+    aria-labelledby="upiAppTitle"
+  >
+
+    <div class="sheet upi-app-sheet">
+
+      <div class="sheet-header">
+
+        <div>
+          <div class="sheet-title" id="upiAppTitle">Choose a UPI app</div>
+          <div class="sheet-subtitle">Select the app you want to pay with</div>
+        </div>
+
+        <button
+          class="close-btn"
+          id="closeUpiAppOverlay"
+          type="button"
+          aria-label="Close"
+        >
+          ×
+        </button>
+
+      </div>
+
+      <div class="sheet-body">
+
+        <div class="upi-app-grid" id="upiAppGrid">
+
+          <button class="upi-app-option" type="button" data-upi-app="gpay">
+            <span class="upi-app-icon" style="background:#ffffff;color:#5f6368;border:1px solid var(--border);">G</span>
+            <span class="upi-app-label">Google Pay</span>
+          </button>
+
+          <button class="upi-app-option" type="button" data-upi-app="phonepe">
+            <span class="upi-app-icon" style="background:#5f259f;color:#ffffff;">Pe</span>
+            <span class="upi-app-label">PhonePe</span>
+          </button>
+
+          <button class="upi-app-option" type="button" data-upi-app="paytm">
+            <span class="upi-app-icon" style="background:#00baf2;color:#ffffff;">P</span>
+            <span class="upi-app-label">Paytm</span>
+          </button>
+
+          <button class="upi-app-option" type="button" data-upi-app="bhim">
+            <span class="upi-app-icon" style="background:#e8a33d;color:#ffffff;">B</span>
+            <span class="upi-app-label">BHIM</span>
+          </button>
+
+          <button class="upi-app-option" type="button" data-upi-app="other">
+            <span class="upi-app-icon" style="background:var(--primary-light);color:var(--primary);">…</span>
+            <span class="upi-app-label">Other UPI apps</span>
+          </button>
+
+        </div>
+
+        <div class="secure-note">
+          You'll return here after paying to confirm your order.
+        </div>
+
+      </div>
+
+    </div>
+
+  </div>
+
   <script src="config.js?v=20260905"></script>
   <script src="app.js?v=20260905"></script>
 

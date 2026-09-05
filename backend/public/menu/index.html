@@ -124,6 +124,94 @@
 
   </section>
 
+  <!-- UPI payment pending screen: shown after an order is created for UPI
+       payment. The order already exists in the cafe's system (staff can see
+       it), but it is NOT marked paid yet — only a human at the counter can
+       do that after verifying the payment actually arrived. -->
+  <section id="upiPendingState" class="full-page-state hidden">
+
+    <div class="state-icon pending-icon">₹</div>
+
+    <div class="success-label" id="upiPendingLabel">
+      PAYMENT PENDING
+    </div>
+
+    <h2 id="upiPendingHeading">Complete your UPI payment</h2>
+
+    <p id="upiPendingSubtext">
+      Pay using any UPI app, then enter the reference number (UTR) below.
+      Your order is already placed — staff will confirm your payment.
+    </p>
+
+    <div class="success-card">
+
+      <div class="success-row">
+        <span>Table</span>
+        <strong id="upiPendingTable">—</strong>
+      </div>
+
+      <div class="success-row">
+        <span>Order number</span>
+        <strong id="upiPendingOrderNumber">—</strong>
+      </div>
+
+      <div class="success-row">
+        <span>Amount to pay</span>
+        <strong id="upiPendingTotal">—</strong>
+      </div>
+
+    </div>
+
+    <button
+      id="upiReopenBtn"
+      class="secondary-btn upi-pay-btn"
+      type="button"
+    >
+      Open UPI App Again
+    </button>
+
+    <div class="field-group upi-pending-field-group">
+      <label class="field-label" for="upiPendingReferenceInput">UPI Reference / UTR</label>
+      <input
+        class="field-input"
+        id="upiPendingReferenceInput"
+        type="text"
+        maxlength="100"
+        placeholder="e.g. 123456789012"
+        autocomplete="off"
+      />
+      <div class="field-help">Find this in your UPI app's payment history / SMS after a successful payment.</div>
+    </div>
+
+    <div id="upiPendingError" class="error-banner hidden"></div>
+
+    <button
+      id="upiSubmitReferenceBtn"
+      class="primary-btn"
+      type="button"
+    >
+      I've Paid — Submit Reference
+    </button>
+
+    <div id="upiPendingStatusCard" class="order-status-card status-open hidden">
+      <div class="order-status-dot"></div>
+      <div>
+        <div class="order-status-kicker">PAYMENT VERIFICATION</div>
+        <div id="upiPendingStatusText" class="order-status-text">Waiting for staff to confirm your payment</div>
+        <div class="order-status-help">This updates automatically. Please keep this page open or check back.</div>
+      </div>
+    </div>
+
+    <button
+      id="upiCancelBtn"
+      class="text-btn danger-text-btn"
+      type="button"
+    >
+      Cancel this order
+    </button>
+
+  </section>
+
   <!-- Main menu -->
   <div id="app" class="hidden">
 
@@ -385,12 +473,6 @@
             </label>
 
 
-            <div id="upiReferenceGroup" class="field-group hidden">
-              <label class="field-label" for="upiReferenceInput">UPI Reference / UTR</label>
-              <input class="field-input" id="upiReferenceInput" type="text" maxlength="100" placeholder="Enter UTR after successful payment" autocomplete="off" />
-              <div class="field-help">Required to submit an online UPI order. Opening/returning from the UPI app is not treated as payment proof.</div>
-            </div>
-
             <button
               id="payUpiBtn"
               class="secondary-btn upi-pay-btn hidden"
@@ -398,6 +480,9 @@
             >
               PAY WITH UPI
             </button>
+            <div class="field-help upi-help-text" id="upiHelpText" style="display:none;">
+              Your order will be placed and you'll be taken to your UPI app to pay. You'll enter the payment reference (UTR) after paying.
+            </div>
           </div>
 
           <div class="field-group">
@@ -438,76 +523,6 @@
 
         <div class="secure-note">
           Your order will be sent directly to the cafe.
-        </div>
-
-      </div>
-
-    </div>
-
-  </div>
-
-  <!-- UPI app picker overlay -->
-  <div
-    class="overlay hidden"
-    id="upiAppOverlay"
-    role="dialog"
-    aria-modal="true"
-    aria-labelledby="upiAppTitle"
-  >
-
-    <div class="sheet upi-app-sheet">
-
-      <div class="sheet-header">
-
-        <div>
-          <div class="sheet-title" id="upiAppTitle">Choose a UPI app</div>
-          <div class="sheet-subtitle">Select the app you want to pay with</div>
-        </div>
-
-        <button
-          class="close-btn"
-          id="closeUpiAppOverlay"
-          type="button"
-          aria-label="Close"
-        >
-          ×
-        </button>
-
-      </div>
-
-      <div class="sheet-body">
-
-        <div class="upi-app-grid" id="upiAppGrid">
-
-          <button class="upi-app-option" type="button" data-upi-app="gpay">
-            <span class="upi-app-icon" style="background:#ffffff;color:#5f6368;border:1px solid var(--border);">G</span>
-            <span class="upi-app-label">Google Pay</span>
-          </button>
-
-          <button class="upi-app-option" type="button" data-upi-app="phonepe">
-            <span class="upi-app-icon" style="background:#5f259f;color:#ffffff;">Pe</span>
-            <span class="upi-app-label">PhonePe</span>
-          </button>
-
-          <button class="upi-app-option" type="button" data-upi-app="paytm">
-            <span class="upi-app-icon" style="background:#00baf2;color:#ffffff;">P</span>
-            <span class="upi-app-label">Paytm</span>
-          </button>
-
-          <button class="upi-app-option" type="button" data-upi-app="bhim">
-            <span class="upi-app-icon" style="background:#e8a33d;color:#ffffff;">B</span>
-            <span class="upi-app-label">BHIM</span>
-          </button>
-
-          <button class="upi-app-option" type="button" data-upi-app="other">
-            <span class="upi-app-icon" style="background:var(--primary-light);color:var(--primary);">…</span>
-            <span class="upi-app-label">Other UPI apps</span>
-          </button>
-
-        </div>
-
-        <div class="secure-note">
-          You'll return here after paying to confirm your order.
         </div>
 
       </div>

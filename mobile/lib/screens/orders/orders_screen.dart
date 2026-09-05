@@ -1049,8 +1049,13 @@ class _OrderTile extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    // 'payment_initiated' means a customer tapped "Pay with UPI" on the QR
+    // menu and was handed off to a UPI app — NOT proof of payment. Staff
+    // still see this as an ordinary pending/unpaid order until they verify
+    // and check it out.
     final paymentPending =
-        order.paymentStatus == 'pending';
+        order.paymentStatus == 'pending' ||
+        order.paymentStatus == 'payment_initiated';
 
     final paymentColor =
         order.paymentStatus == 'paid'

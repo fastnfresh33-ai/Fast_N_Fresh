@@ -44,7 +44,15 @@ class QrService {
 
   Future<void> printQrFlyer(CafeTable table, Uint8List qrPngBytes, {String cafeName = 'Fast N Fresh Cafe'}) async {
     final bytes = await buildQrFlyerPdf(table, qrPngBytes, cafeName: cafeName);
-    await Printing.layoutPdf(onLayout: (_) async => bytes);
+    // Lock the print job to the flyer's real A6 page size (matching
+    // pageFormat above) instead of letting the OS renegotiate against the
+    // selected printer, which otherwise defaults to A4 and prints the
+    // small flyer pinned to a corner of an otherwise blank full page.
+    await Printing.layoutPdf(
+      onLayout: (_) async => bytes,
+      format: PdfPageFormat.a6,
+      dynamicLayout: false,
+    );
   }
 
   Future<void> shareQrFlyer(CafeTable table, Uint8List qrPngBytes, {String cafeName = 'Fast N Fresh Cafe'}) async {

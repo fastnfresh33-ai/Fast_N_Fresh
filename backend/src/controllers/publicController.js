@@ -223,6 +223,15 @@ const createPublicOrder = asyncHandler(async (req, res) => {
 
   const orderNumber = await Counter.getNextSequence('orderNumber');
 
+  // A QR order is NOT financially settled just because the customer chose
+  // UPI, was handed off to a UPI app, or later returns and enters a UTR.
+  // Settlement (paymentStatus = 'paid') happens ONLY at authenticated staff
+  // checkout (see orderController.checkoutOrder), after a human confirms
+  // the money actually arrived. For UPI, order creation IS the payment
+  // "initiation" moment — the DB now tracks that state explicitly so staff
+  // can see it, instead of it only living in the customer's browser.
+  const initialPaymentStatus = normalizedPaymentMethod === 'UPI' ? 'payment_initiated' : 'pending';
+
   let order;
   try {
     order = await Order.create({
@@ -241,10 +250,8 @@ const createPublicOrder = asyncHandler(async (req, res) => {
       tax,
       grandTotal,
       paymentMethod: normalizedPaymentMethod,
-      paymentStatus: 'pending',
-      // A QR order is NOT financially settled just because the customer
-      // selected Cash/UPI or returned from the UPI app. Settlement happens
-      // only at authenticated staff checkout.
+      paymentStatus: initialPaymentStatus,
+      paymentInitiatedAt: initialPaymentStatus === 'payment_initiated' ? new Date() : undefined,
       paymentBreakdown: { cash: 0, upi: 0, credit: 0 },
       upiReference: normalizedUpiReference || undefined,
       notes: note ? note.trim() : undefined,
@@ -279,6 +286,65 @@ const createPublicOrder = asyncHandler(async (req, res) => {
 
 
 
+// POST /api/public/orders/:id/upi-reference — customer submits the UTR/
+// reference number after returning from their UPI app.
+//
+// IMPORTANT: this does NOT mark the order paid. It only records what the
+// customer claims to have paid with. paymentStatus stays 'payment_initiated'
+// (awaiting a human to verify and check the order out as paid). There is
+// currently no payment gateway/webhook wired up to this project that could
+// verify a UPI transaction automatically — see the note in
+// getPublicPaymentOptions' caller / project docs for what would be needed
+// to add that.
+const submitPublicUpiReference = asyncHandler(async (req, res) => {
+  const token = String(req.body?.token || req.query.token || '').trim();
+  if (!token) throw new ApiError(400, 'Tracking token is required.');
+
+  const rawReference = req.body?.upiReference;
+  const upiReference = typeof rawReference === 'string' ? rawReference.trim() : '';
+  if (!upiReference) throw new ApiError(400, 'Please enter your UPI reference / UTR.');
+  if (upiReference.length > 100) throw new ApiError(400, 'UPI reference is too long.');
+  if (!/^[A-Za-z0-9/_-]{4,100}$/.test(upiReference)) {
+    throw new ApiError(400, 'That doesn\'t look like a valid UPI reference / UTR.');
+  }
+
+  const order = await Order.findOne({
+    _id: req.params.id,
+    clientRequestId: token,
+    orderSource: 'qr',
+  }).populate('table', 'name number');
+
+  if (!order) throw new ApiError(404, 'Order not found.');
+  if (order.paymentMethod !== 'UPI') throw new ApiError(400, 'This order is not a UPI payment.');
+  if (order.status === 'voided' || order.paymentStatus === 'cancelled') {
+    throw new ApiError(409, 'This order was cancelled.');
+  }
+  if (order.paymentStatus === 'paid') {
+    // Idempotent: customer double-tapped submit after staff already
+    // verified it. Not an error.
+    return res.json(publicOrderResponse(order, order.table));
+  }
+  if (order.paymentStatus !== 'payment_initiated') {
+    throw new ApiError(409, 'This order cannot accept a UPI reference right now.');
+  }
+
+  // A UTR must be unique across already-verified payments — prevents one
+  // real payment's reference being reused across multiple unpaid orders.
+  const existingPayment = await Order.findOne({
+    upiReference,
+    paymentStatus: 'paid',
+    _id: { $ne: order._id },
+  }).select('_id');
+  if (existingPayment) {
+    throw new ApiError(409, 'This UPI reference has already been used for another order. Please double-check the UTR.');
+  }
+
+  order.upiReference = upiReference;
+  await order.save();
+
+  res.json(publicOrderResponse(order, order.table));
+});
+
 // POST /api/public/orders/:id/cancel?token=<clientRequestId>
 // Cancels a QR order that was created for a payment attempt but was not
 // completed. The clientRequestId is required so a customer cannot cancel
@@ -304,7 +370,7 @@ const cancelPublicOrder = asyncHandler(async (req, res) => {
   order.status = 'voided';
   order.paymentStatus = 'cancelled';
   order.voidedAt = new Date();
-  order.voidReason = 'Customer cancelled UPI payment.';
+  order.voidReason = order.paymentMethod === 'UPI' ? 'Customer cancelled UPI payment.' : 'Customer cancelled order.';
   await order.save();
 
   res.json({ success: true, message: 'Order cancelled.' });
@@ -347,4 +413,12 @@ const getPublicOrderStatus = asyncHandler(async (req, res) => {
   });
 });
 
-module.exports = { getPublicMenu, getPublicTable, getPublicPaymentOptions, createPublicOrder, cancelPublicOrder, getPublicOrderStatus };
+module.exports = {
+  getPublicMenu,
+  getPublicTable,
+  getPublicPaymentOptions,
+  createPublicOrder,
+  submitPublicUpiReference,
+  cancelPublicOrder,
+  getPublicOrderStatus,
+};

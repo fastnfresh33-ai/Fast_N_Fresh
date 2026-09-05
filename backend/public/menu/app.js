@@ -67,15 +67,23 @@
     orderNote: document.getElementById('orderNote'),
     onlinePaymentOption: document.getElementById('onlinePaymentOption'),
     payUpiBtn: document.getElementById('payUpiBtn'),
-    upiReferenceGroup: document.getElementById('upiReferenceGroup'),
-    upiReferenceInput: document.getElementById('upiReferenceInput'),
+    upiHelpText: document.getElementById('upiHelpText'),
 
     checkoutError: document.getElementById('checkoutError'),
     placeOrderBtn: document.getElementById('placeOrderBtn'),
 
-    upiAppOverlay: document.getElementById('upiAppOverlay'),
-    closeUpiAppOverlay: document.getElementById('closeUpiAppOverlay'),
-    upiAppGrid: document.getElementById('upiAppGrid'),
+    upiPendingState: document.getElementById('upiPendingState'),
+    upiPendingHeading: document.getElementById('upiPendingHeading'),
+    upiPendingTable: document.getElementById('upiPendingTable'),
+    upiPendingOrderNumber: document.getElementById('upiPendingOrderNumber'),
+    upiPendingTotal: document.getElementById('upiPendingTotal'),
+    upiReopenBtn: document.getElementById('upiReopenBtn'),
+    upiPendingReferenceInput: document.getElementById('upiPendingReferenceInput'),
+    upiPendingError: document.getElementById('upiPendingError'),
+    upiSubmitReferenceBtn: document.getElementById('upiSubmitReferenceBtn'),
+    upiPendingStatusCard: document.getElementById('upiPendingStatusCard'),
+    upiPendingStatusText: document.getElementById('upiPendingStatusText'),
+    upiCancelBtn: document.getElementById('upiCancelBtn'),
   };
 
   const state = {
@@ -101,13 +109,12 @@
     clientRequestId: null,
     tracking: { orderId: null, token: null, timer: null, status: null },
     feedbackRating: 0,
-    // Set only after returning from the external UPI app. Returning alone
-    // never submits an order; the customer must press Place Order.
-    pendingUpiReady: false,
-    // The UPI query string (pa=...&pn=...&am=... etc, without the scheme)
-    // built for the current checkout attempt, reused for whichever app the
-    // customer picks in the UPI app picker.
-    pendingUpiQuery: '',
+    // Holds the order created the moment the customer taps "Pay with UPI".
+    // The order exists in the cafe's system immediately (staff can see an
+    // unpaid QR order), but paymentStatus stays 'payment_initiated' until a
+    // human verifies the money arrived. Shape:
+    // { orderId, token, orderNumber, tableName, tableNumber, total, items, upiUrl, referenceSubmitted, pollTimer }
+    upiOrder: null,
   };
 
   function generateRequestId() {
@@ -125,9 +132,6 @@
 
   function invalidateClientRequestId() {
     state.clientRequestId = null;
-    // A cart change invalidates any previous UPI payment attempt because the
-    // amount/items may no longer match what was shown in the UPI app.
-    state.pendingUpiReady = false;
   }
 
   /* =========================================================
@@ -167,6 +171,7 @@
       'loadingState',
       'errorState',
       'successState',
+      'upiPendingState',
       'app',
     ].forEach((key) => {
       if (!els[key]) return;
@@ -446,6 +451,9 @@
       state.paymentOptions.onlineUpi = onlineUpiEnabled;
       if (els.onlinePaymentOption) {
         els.onlinePaymentOption.style.display = onlineUpiEnabled ? 'flex' : 'none';
+      }
+      if (els.upiHelpText) {
+        els.upiHelpText.style.display = onlineUpiEnabled ? 'block' : 'none';
       }
       updatePaymentActions();
 
@@ -1177,9 +1185,11 @@
     const selectedPayment = document.querySelector('input[name="paymentMethod"]:checked');
     const paymentMethod = selectedPayment?.value === 'upi' ? 'UPI' : 'CASH';
 
-    if (paymentMethod === 'UPI' && !state.paymentOptions.upiId) {
-      els.checkoutError.textContent = 'Online UPI payment is not configured right now. Please choose Pay at Counter.';
-      els.checkoutError.classList.remove('hidden');
+    // Pay-with-UPI is a separate, dedicated button/flow (see startUpiPayment)
+    // because it creates the order immediately and hands off to a UPI app.
+    // "Place Order" here only ever handles Pay-at-Counter (CASH).
+    if (paymentMethod === 'UPI') {
+      await startUpiPayment();
       return;
     }
 
@@ -1196,24 +1206,9 @@
       customerPhone: customerPhone || undefined,
       note: els.orderNote.value.trim() || undefined,
       items,
-      paymentMethod,
-    upiReference: paymentMethod === 'UPI' ? els.upiReferenceInput.value.trim() : '',
+      paymentMethod: 'CASH',
       clientRequestId: state.clientRequestId,
     };
-
-    if (paymentMethod === 'UPI' && !state.pendingUpiReady) {
-      // The main Place Order button also starts UPI checkout. This keeps the
-      // customer flow simple: select UPI -> tap Place Order -> choose a UPI app.
-      await startUpiPayment();
-      return;
-    }
-
-    if (paymentMethod === 'UPI' && !els.upiReferenceInput.value.trim()) {
-      els.checkoutError.textContent = 'Enter the UPI reference / UTR after successful payment.';
-      els.checkoutError.classList.remove('hidden');
-      els.upiReferenceInput.focus();
-      return;
-    }
 
     els.placeOrderBtn.disabled = true;
     els.placeOrderBtn.textContent = 'Placing order...';
@@ -1222,6 +1217,146 @@
     els.placeOrderBtn.textContent = 'Place Order';
   }
 
+  // Builds an Android/iOS-compatible UPI deep link (the `upi://pay` intent
+  // scheme every major UPI app — GPay, PhonePe, Paytm, BHIM, etc. —
+  // registers itself to handle) and hands off to it via a real user-gesture
+  // anchor click. On Android, the OS shows its normal "open with" app
+  // chooser for any UPI apps installed on the phone; nothing here needs to
+  // enumerate specific apps.
+  //
+  // Every parameter is percent-encoded and the amount always comes from the
+  // ALREADY-CREATED, server-priced order (orderInfo.total) — never a
+  // client-computed or user-editable number.
+  function buildUpiUrl(orderInfo) {
+    const upiId = String(state.paymentOptions.upiId || '').trim();
+    const amount = Number(orderInfo.total);
+    const params = [
+      `pa=${encodeURIComponent(upiId)}`,
+      `pn=${encodeURIComponent(state.paymentOptions.cafeName || 'FAST N FRESH CAFE')}`,
+      `am=${encodeURIComponent(amount.toFixed(2))}`,
+      'cu=INR',
+      `tr=${encodeURIComponent(String(orderInfo.orderNumber))}`,
+      `tn=${encodeURIComponent(`Order ${orderInfo.orderNumber} - Table ${orderInfo.tableNumber}`)}`,
+    ];
+    return `upi://pay?${params.join('&')}`;
+  }
+
+  // Fires the UPI intent. Returns false (and shows a fallback message)
+  // if this browser/page can't attempt an external-app handoff at all —
+  // e.g. it isn't in a real user-gesture context — since a failed/blocked
+  // intent has no reliable JS callback we can detect.
+  function fireUpiIntent(orderInfo) {
+    try {
+      const upiUrl = buildUpiUrl(orderInfo);
+      const upiLink = document.createElement('a');
+      upiLink.href = upiUrl;
+      upiLink.setAttribute('aria-hidden', 'true');
+      upiLink.style.display = 'none';
+      document.body.appendChild(upiLink);
+      upiLink.click();
+      window.setTimeout(() => upiLink.remove(), 1500);
+
+      // If no UPI app is installed, Android/Chrome silently does nothing
+      // (no exception is thrown) — there is no JS-visible signal either
+      // way. Tell the customer what to check, without claiming success.
+      window.setTimeout(() => {
+        if (document.visibilityState === 'visible' && els.upiPendingError) {
+          els.upiPendingError.textContent =
+            "If nothing opened, you may not have a UPI app installed (Google Pay, PhonePe, Paytm, BHIM, etc.). Install one and tap \"Open UPI App Again\", or ask staff to pay by cash.";
+          els.upiPendingError.classList.remove('hidden');
+        }
+      }, 1800);
+      return true;
+    } catch (_) {
+      if (els.upiPendingError) {
+        els.upiPendingError.textContent = 'Could not open a UPI app on this device. Please ask staff to pay by cash, or try again.';
+        els.upiPendingError.classList.remove('hidden');
+      }
+      return false;
+    }
+  }
+
+  function renderUpiPendingScreen(orderInfo) {
+    if (els.upiPendingTable) els.upiPendingTable.textContent = orderInfo.tableName || `Table ${orderInfo.tableNumber}`;
+    if (els.upiPendingOrderNumber) els.upiPendingOrderNumber.textContent = `#${orderInfo.orderNumber}`;
+    if (els.upiPendingTotal) els.upiPendingTotal.textContent = formatMoney(orderInfo.total);
+    if (els.upiPendingReferenceInput) els.upiPendingReferenceInput.value = orderInfo.upiReference || '';
+    if (els.upiPendingError) els.upiPendingError.classList.add('hidden');
+
+    const submitted = !!orderInfo.referenceSubmitted;
+    if (els.upiPendingReferenceInput) els.upiPendingReferenceInput.disabled = submitted;
+    if (els.upiSubmitReferenceBtn) els.upiSubmitReferenceBtn.classList.toggle('hidden', submitted);
+    if (els.upiPendingStatusCard) els.upiPendingStatusCard.classList.toggle('hidden', !submitted);
+    if (els.upiPendingStatusText) {
+      els.upiPendingStatusText.textContent = 'Reference received — waiting for staff to confirm your payment.';
+    }
+    if (els.upiPendingHeading) {
+      els.upiPendingHeading.textContent = submitted ? 'Payment submitted' : 'Complete your UPI payment';
+    }
+  }
+
+  function saveUpiOrderToStorage() {
+    if (!state.upiOrder) return;
+    try {
+      const { pollTimer, ...toStore } = state.upiOrder;
+      localStorage.setItem(PENDING_UPI_KEY, JSON.stringify(toStore));
+    } catch (_) {}
+  }
+
+  function stopUpiPolling() {
+    if (state.upiOrder && state.upiOrder.pollTimer) {
+      window.clearInterval(state.upiOrder.pollTimer);
+      state.upiOrder.pollTimer = null;
+    }
+  }
+
+  function clearUpiOrder() {
+    stopUpiPolling();
+    state.upiOrder = null;
+    try { localStorage.removeItem(PENDING_UPI_KEY); } catch (_) {}
+  }
+
+  // While the payment-pending screen is showing, poll the customer-safe
+  // order-status endpoint so this page reflects the REAL server-side
+  // paymentStatus. This is display-only: it never sets anything to paid
+  // itself — that still only happens via authenticated staff checkout.
+  function startUpiPolling() {
+    stopUpiPolling();
+    if (!state.upiOrder) return;
+    const poll = async () => {
+      if (!state.upiOrder) return;
+      try {
+        const response = await apiRequest(
+          `/public/orders/${encodeURIComponent(state.upiOrder.orderId)}/status?token=${encodeURIComponent(state.upiOrder.token)}`
+        );
+        const data = response.data || {};
+        if (data.status === 'voided' || data.paymentStatus === 'cancelled') {
+          clearUpiOrder();
+          showState('app');
+          return;
+        }
+        if (data.paymentStatus === 'paid') {
+          const orderInfo = state.upiOrder;
+          clearUpiOrder();
+          if (els.successHeading) els.successHeading.textContent = 'Payment confirmed!';
+          if (els.successSubtext) els.successSubtext.textContent = 'Your UPI payment has been verified by the cafe.';
+          els.successTable.textContent = data.tableName || orderInfo.tableName;
+          els.successOrderNumber.textContent = `#${data.orderNumber || orderInfo.orderNumber}`;
+          els.successTotal.textContent = formatMoney(data.total != null ? data.total : orderInfo.total);
+          renderOrderItems(data.items || orderInfo.items);
+          state.feedbackRating = 0;
+          els.feedbackBox.classList.add('hidden');
+          els.feedbackMessage.textContent = '';
+          startOrderTracking(orderInfo.orderId, orderInfo.token, data.status);
+          try { localStorage.setItem(PENDING_ORDER_KEY, JSON.stringify({ orderId: orderInfo.orderId, token: orderInfo.token, orderNumber: data.orderNumber || orderInfo.orderNumber })); } catch (_) {}
+          showState('successState');
+        }
+      } catch (_) {
+        // Best-effort polling; keep showing the last known state.
+      }
+    };
+    state.upiOrder.pollTimer = window.setInterval(poll, 6000);
+  }
 
   async function startUpiPayment() {
     if (state.cart.size === 0) return;
@@ -1266,82 +1401,122 @@
       clientRequestId: state.clientRequestId,
     };
 
-    state.pendingUpiReady = false;
-    if (els.upiReferenceInput) els.upiReferenceInput.value = '';
-    if (els.upiReferenceGroup) els.upiReferenceGroup.classList.add('hidden');
+    if (els.payUpiBtn) {
+      els.payUpiBtn.disabled = true;
+      els.payUpiBtn.textContent = 'Placing order...';
+    }
+
+    // The order is created NOW, at 'payment_initiated' — server-priced,
+    // server-verified — BEFORE we ever hand off to a UPI app. This is what
+    // gives staff (and this page, on resume) a real, authoritative record
+    // of the payment attempt instead of only a client-side draft.
+    let response;
     try {
-      localStorage.setItem(PENDING_UPI_KEY, JSON.stringify({
-        payload,
-        cartItems: Array.from(state.cart.values()).map((line) => ({
-          product: line.product,
-          quantity: line.quantity,
-        })),
-      }));
-    } catch (_) {}
+      response = await apiRequest('/public/orders', {
+        method: 'POST',
+        body: JSON.stringify(payload),
+      });
+    } catch (error) {
+      els.checkoutError.textContent = error.message || 'Could not start UPI payment. Please try again.';
+      els.checkoutError.classList.remove('hidden');
+      if (els.payUpiBtn) {
+        els.payUpiBtn.disabled = false;
+        els.payUpiBtn.textContent = 'PAY WITH UPI';
+      }
+      return;
+    }
 
-    // Build the standard UPI query string. `tr` ties the payment attempt to
-    // this cart/order request while the UTR entered after payment remains
-    // the actual proof recorded with the order. This same query string is
-    // reused for whichever specific app the customer picks below.
-    state.pendingUpiQuery = [
-      `pa=${encodeURIComponent(upiId)}`,
-      `pn=${encodeURIComponent(state.paymentOptions.cafeName || 'FAST N FRESH CAFE')}`,
-      `am=${encodeURIComponent(total.toFixed(2))}`,
-      'cu=INR',
-      `tr=${encodeURIComponent(state.clientRequestId)}`,
-      `tn=${encodeURIComponent(`Order for Table ${state.tableNumber}`)}`,
-      'mode=02',
-      'purpose=00',
-    ].join('&');
+    if (els.payUpiBtn) {
+      els.payUpiBtn.disabled = false;
+      els.payUpiBtn.textContent = 'PAY WITH UPI';
+    }
 
-    // Let the customer pick which UPI app to pay with instead of guessing;
-    // the actual app launch happens in launchUpiApp() once they choose.
-    openUpiAppPicker();
+    const data = response.data;
+    state.cart.clear();
+    invalidateClientRequestId();
+    closeCart();
+    updateCartBar();
 
-    // External UPI navigation never creates the order. The customer must
-    // return and explicitly press Place Order after entering the UTR.
+    state.upiOrder = {
+      orderId: data.orderId,
+      token: data.trackingToken,
+      orderNumber: data.orderNumber,
+      tableName: data.tableName,
+      tableNumber: data.tableNumber,
+      total: data.total,
+      items: data.items,
+      referenceSubmitted: false,
+      pollTimer: null,
+    };
+    saveUpiOrderToStorage();
+    renderUpiPendingScreen(state.upiOrder);
+    showState('upiPendingState');
+    startUpiPolling();
+
+    // Hand off to the UPI app AFTER the order + pending screen already
+    // exist, so a customer who never returns to this tab still has a
+    // real, staff-visible order rather than nothing at all.
+    fireUpiIntent(state.upiOrder);
   }
 
-  // Scheme prefixes for each UPI app option. "other" uses the generic
-  // upi://pay scheme, which on Android hands off to the OS chooser for any
-  // installed UPI app not listed explicitly above.
-  const UPI_APP_SCHEMES = {
-    gpay: 'tez://upi/pay',
-    phonepe: 'phonepe://pay',
-    paytm: 'paytmmp://pay',
-    bhim: 'bhim://pay',
-    other: 'upi://pay',
-  };
+  async function submitUpiReference() {
+    if (!state.upiOrder) return;
+    const upiReference = (els.upiPendingReferenceInput?.value || '').trim();
+    if (els.upiPendingError) els.upiPendingError.classList.add('hidden');
+    if (!upiReference) {
+      if (els.upiPendingError) {
+        els.upiPendingError.textContent = 'Please enter the UPI reference / UTR from your payment.';
+        els.upiPendingError.classList.remove('hidden');
+      }
+      return;
+    }
 
-  function openUpiAppPicker() {
-    if (!els.upiAppOverlay) return;
-    els.upiAppOverlay.classList.remove('hidden');
-    document.body.style.overflow = 'hidden';
+    if (els.upiSubmitReferenceBtn) {
+      els.upiSubmitReferenceBtn.disabled = true;
+      els.upiSubmitReferenceBtn.textContent = 'Submitting...';
+    }
+    try {
+      await apiRequest(`/public/orders/${encodeURIComponent(state.upiOrder.orderId)}/upi-reference`, {
+        method: 'POST',
+        body: JSON.stringify({ token: state.upiOrder.token, upiReference }),
+      });
+      state.upiOrder.referenceSubmitted = true;
+      state.upiOrder.upiReference = upiReference;
+      saveUpiOrderToStorage();
+      renderUpiPendingScreen(state.upiOrder);
+    } catch (error) {
+      if (els.upiPendingError) {
+        els.upiPendingError.textContent = error.message || 'Could not submit reference. Please try again.';
+        els.upiPendingError.classList.remove('hidden');
+      }
+    } finally {
+      if (els.upiSubmitReferenceBtn) {
+        els.upiSubmitReferenceBtn.disabled = false;
+        els.upiSubmitReferenceBtn.textContent = "I've Paid — Submit Reference";
+      }
+    }
   }
 
-  function closeUpiAppPicker() {
-    if (!els.upiAppOverlay) return;
-    els.upiAppOverlay.classList.add('hidden');
-    document.body.style.overflow = '';
-  }
-
-  function launchUpiApp(appKey) {
-    const scheme = UPI_APP_SCHEMES[appKey] || UPI_APP_SCHEMES.other;
-    if (!state.pendingUpiQuery) return;
-    const upiUrl = `${scheme}?${state.pendingUpiQuery}`;
-
-    // Use a real user-gesture anchor instead of assigning window.location.
-    // This is more reliable in Android Chrome/PWA browsers for handing the
-    // UPI URI to installed apps such as GPay, PhonePe and Paytm.
-    const upiLink = document.createElement('a');
-    upiLink.href = upiUrl;
-    upiLink.setAttribute('aria-hidden', 'true');
-    upiLink.style.display = 'none';
-    document.body.appendChild(upiLink);
-    upiLink.click();
-    window.setTimeout(() => upiLink.remove(), 1500);
-
-    closeUpiAppPicker();
+  async function cancelUpiOrder() {
+    if (!state.upiOrder) return;
+    if (!window.confirm('Cancel this order? This cannot be undone.')) return;
+    const orderInfo = state.upiOrder;
+    if (els.upiCancelBtn) els.upiCancelBtn.disabled = true;
+    try {
+      await apiRequest(`/public/orders/${encodeURIComponent(orderInfo.orderId)}/cancel`, {
+        method: 'POST',
+        body: JSON.stringify({ token: orderInfo.token }),
+      });
+      clearUpiOrder();
+      showState('app');
+    } catch (error) {
+      if (els.upiPendingError) {
+        els.upiPendingError.textContent = error.message || 'Could not cancel this order. Please ask staff for help.';
+        els.upiPendingError.classList.remove('hidden');
+      }
+    } finally {
+      if (els.upiCancelBtn) els.upiCancelBtn.disabled = false;
+    }
   }
 
   async function submitCreatedOrder(payload) {
@@ -1353,7 +1528,6 @@
 
       state.cart.clear();
       invalidateClientRequestId();
-      try { localStorage.removeItem(PENDING_UPI_KEY); } catch (_) {}
 
       closeCart();
       updateCartBar();
@@ -1384,48 +1558,73 @@
     }
   }
 
-  function restorePendingUpiCart(draft) {
-    if (state.cart.size > 0 || !Array.isArray(draft.cartItems)) return;
-    const availableById = new Map((state.items || []).map((item) => [String(item._id), item]));
-    draft.cartItems.forEach((saved) => {
-      const product = availableById.get(String(saved.product?._id || saved.product?.id || '')) || saved.product;
-      const quantity = Number(saved.quantity);
-      if (product && Number.isInteger(quantity) && quantity > 0) {
-        state.cart.set(product._id, { product, quantity });
-      }
-    });
-    renderProducts();
-    updateCartBar();
-  }
-
+  // On page load / tab resume, checks whether there's a UPI order this
+  // browser started that hasn't been resolved yet (customer left mid-flow,
+  // or the page reloaded) and restores the correct screen for it. This
+  // reads the order's CURRENT server-side status every time — it never
+  // trusts whatever was true when the tab was left.
   let upiResumeBusy = false;
 
   async function maybeResumePendingUpiPayment() {
-    if (upiResumeBusy) return;
-    let hasPending = false;
-    try { hasPending = !!localStorage.getItem(PENDING_UPI_KEY); } catch (_) {}
-    if (!hasPending) return;
-    upiResumeBusy = true;
-    try { await resumePendingUpiPayment(); } finally { upiResumeBusy = false; }
-  }
-
-  async function resumePendingUpiPayment() {
-    let draft = null;
+    if (upiResumeBusy || state.upiOrder) return;
+    let saved = null;
     try {
       const raw = localStorage.getItem(PENDING_UPI_KEY);
-      if (raw) draft = JSON.parse(raw);
+      if (raw) saved = JSON.parse(raw);
     } catch (_) {}
-    if (!draft || !draft.payload) return;
-    restorePendingUpiCart(draft);
+    if (!saved || !saved.orderId || !saved.token) return;
 
-    // Returning from UPI is NOT proof of payment. Never submit the order or
-    // mark it paid here. Restore checkout and require explicit Place Order.
-    state.pendingUpiReady = true;
-    if (els.upiReferenceGroup) els.upiReferenceGroup.classList.remove('hidden');
-    if (els.placeOrderBtn) els.placeOrderBtn.textContent = 'Place Order';
-    els.checkoutError.textContent = 'Returned from UPI. If you completed the payment, press “Place Order” to submit your order. If you cancelled, you can simply change the payment method or close checkout.';
-    els.checkoutError.classList.remove('hidden');
-    openCart();
+    upiResumeBusy = true;
+    try {
+      const response = await apiRequest(
+        `/public/orders/${encodeURIComponent(saved.orderId)}/status?token=${encodeURIComponent(saved.token)}`
+      );
+      const data = response.data || {};
+
+      if (data.status === 'voided' || data.paymentStatus === 'cancelled') {
+        try { localStorage.removeItem(PENDING_UPI_KEY); } catch (_) {}
+        return;
+      }
+
+      if (data.paymentStatus === 'paid') {
+        try { localStorage.removeItem(PENDING_UPI_KEY); } catch (_) {}
+        if (els.successHeading) els.successHeading.textContent = 'Payment confirmed!';
+        if (els.successSubtext) els.successSubtext.textContent = 'Your UPI payment has been verified by the cafe.';
+        els.successTable.textContent = data.tableName || saved.tableName;
+        els.successOrderNumber.textContent = `#${data.orderNumber}`;
+        els.successTotal.textContent = formatMoney(data.total);
+        renderOrderItems(data.items);
+        startOrderTracking(saved.orderId, saved.token, data.status);
+        try { localStorage.setItem(PENDING_ORDER_KEY, JSON.stringify({ orderId: saved.orderId, token: saved.token, orderNumber: data.orderNumber })); } catch (_) {}
+        showState('successState');
+        return;
+      }
+
+      // Still payment_initiated (or, defensively, any other non-final
+      // status): show the pending screen with whatever we know so far.
+      state.upiOrder = {
+        orderId: saved.orderId,
+        token: saved.token,
+        orderNumber: data.orderNumber || saved.orderNumber,
+        tableName: data.tableName || saved.tableName,
+        tableNumber: data.tableNumber || saved.tableNumber,
+        total: data.total != null ? data.total : saved.total,
+        items: data.items || saved.items,
+        upiReference: data.paymentMethod === 'UPI' ? saved.upiReference : undefined,
+        referenceSubmitted: !!saved.referenceSubmitted,
+        pollTimer: null,
+      };
+      renderUpiPendingScreen(state.upiOrder);
+      showState('upiPendingState');
+      startUpiPolling();
+    } catch (_) {
+      // Tracking token/order no longer resolvable (e.g. very old link) —
+      // silently drop it and let the customer see a fresh menu instead of
+      // getting stuck.
+      try { localStorage.removeItem(PENDING_UPI_KEY); } catch (_) {}
+    } finally {
+      upiResumeBusy = false;
+    }
   }
 
   function updatePaymentActions() {
@@ -1433,16 +1632,12 @@
     const isUpi = selected?.value === 'upi';
     if (els.payUpiBtn) {
       els.payUpiBtn.classList.toggle('hidden', !isUpi);
-      els.payUpiBtn.disabled = state.cart.size === 0 || (isUpi && state.pendingUpiReady);
-      els.payUpiBtn.textContent = state.pendingUpiReady ? 'UPI PAYMENT STARTED' : 'PAY WITH UPI';
-    }
-    if (els.upiReferenceGroup) {
-      els.upiReferenceGroup.classList.toggle('hidden', !isUpi || !state.pendingUpiReady);
+      els.payUpiBtn.disabled = state.cart.size === 0;
+      els.payUpiBtn.textContent = 'PAY WITH UPI';
     }
     if (els.placeOrderBtn) {
-      els.placeOrderBtn.textContent = isUpi
-        ? (state.pendingUpiReady ? 'PLACE ORDER' : 'PLACE ORDER AFTER UPI')
-        : 'PLACE ORDER';
+      els.placeOrderBtn.classList.toggle('hidden', isUpi);
+      els.placeOrderBtn.textContent = 'Place Order';
     }
   }
 
@@ -1538,27 +1733,22 @@
     els.payUpiBtn.addEventListener('click', startUpiPayment);
   }
 
-  if (els.closeUpiAppOverlay) {
-    els.closeUpiAppOverlay.addEventListener('click', closeUpiAppPicker);
-  }
-
-  if (els.upiAppOverlay) {
-    els.upiAppOverlay.addEventListener('click', (event) => {
-      if (event.target === els.upiAppOverlay) closeUpiAppPicker();
+  if (els.upiReopenBtn) {
+    els.upiReopenBtn.addEventListener('click', () => {
+      if (state.upiOrder) fireUpiIntent(state.upiOrder);
     });
   }
 
-  if (els.upiAppGrid) {
-    els.upiAppGrid.addEventListener('click', (event) => {
-      const button = event.target.closest('[data-upi-app]');
-      if (!button) return;
-      launchUpiApp(button.getAttribute('data-upi-app'));
-    });
+  if (els.upiSubmitReferenceBtn) {
+    els.upiSubmitReferenceBtn.addEventListener('click', submitUpiReference);
+  }
+
+  if (els.upiCancelBtn) {
+    els.upiCancelBtn.addEventListener('click', cancelUpiOrder);
   }
 
   document.querySelectorAll('input[name="paymentMethod"]').forEach((input) => {
     input.addEventListener('change', () => {
-      state.pendingUpiReady = false;
       updatePaymentActions();
     });
   });

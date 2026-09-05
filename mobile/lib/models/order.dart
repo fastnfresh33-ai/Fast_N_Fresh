@@ -76,7 +76,7 @@ class Order {
   final QrCustomerContact? qrCustomerContact;
   final DeliveryInfo? deliveryInfo;
   final String paymentMethod; // CASH | UPI | CREDIT | MIXED
-  final String paymentStatus; // pending | paid | failed | cancelled
+  final String paymentStatus; // pending | payment_initiated | paid | failed | cancelled
   final PaymentBreakdown paymentBreakdown;
   final String? upiReference;
   final double? amountReceived;

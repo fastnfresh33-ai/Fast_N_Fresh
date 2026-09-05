@@ -28,23 +28,13 @@ class ReceiptService {
     double widthMm = 80,
   }) async {
     final doc = pw.Document();
-    final pageWidth = widthMm * PdfPageFormat.mm;
     final is58 = widthMm <= 60;
     final chars = is58 ? 30 : 42;
     final fontSize = is58 ? 7.2 : 8.2;
     final smallSize = is58 ? 6.4 : 7.2;
 
     // Enough room for the receipt while remaining a finite, valid PDF page.
-    final lineCount = 24 + order.items.length * 2;
-    final estimatedHeight = (lineCount * (fontSize + 2.5) + 70).clamp(180, 500).toDouble() * PdfPageFormat.mm;
-    final format = PdfPageFormat(
-      pageWidth,
-      estimatedHeight,
-      marginLeft: 3.5 * PdfPageFormat.mm,
-      marginRight: 3.5 * PdfPageFormat.mm,
-      marginTop: 4 * PdfPageFormat.mm,
-      marginBottom: 4 * PdfPageFormat.mm,
-    );
+    final format = _receiptFormat(widthMm, order.items.length);
 
     final totalTax = order.tax;
     final halfTax = totalTax / 2;
@@ -318,13 +308,46 @@ class ReceiptService {
     return value.toStringAsFixed(2).replaceFirst(RegExp(r'0+$'), '').replaceFirst(RegExp(r'\.$'), '');
   }
 
+  /// The exact page size used for a receipt with [itemCount] line items on a
+  /// [widthMm] roll. Shared by [buildReceiptPdf] (to build the PDF) and
+  /// [printReceipt] (to tell the OS print dialog what size that PDF already
+  /// is), so the two can never disagree.
+  PdfPageFormat _receiptFormat(double widthMm, int itemCount) {
+    final pageWidth = widthMm * PdfPageFormat.mm;
+    final is58 = widthMm <= 60;
+    final fontSize = is58 ? 7.2 : 8.2;
+    final lineCount = 24 + itemCount * 2;
+    final estimatedHeight = (lineCount * (fontSize + 2.5) + 70).clamp(180, 500).toDouble() * PdfPageFormat.mm;
+    return PdfPageFormat(
+      pageWidth,
+      estimatedHeight,
+      marginLeft: 3.5 * PdfPageFormat.mm,
+      marginRight: 3.5 * PdfPageFormat.mm,
+      marginTop: 4 * PdfPageFormat.mm,
+      marginBottom: 4 * PdfPageFormat.mm,
+    );
+  }
+
   Future<void> printReceipt(
     Order order,
     BusinessSettings settings, {
     double widthMm = 80,
   }) async {
     final bytes = await buildReceiptPdf(order, settings, widthMm: widthMm);
-    await Printing.layoutPdf(onLayout: (_) async => bytes);
+
+    // IMPORTANT: without an explicit `format` (matching the PDF's own page
+    // size) and `dynamicLayout: false`, the OS print dialog is free to
+    // renegotiate the page size against the selected printer — commonly
+    // defaulting to A4. Since our PDF is a small fixed thermal-roll size,
+    // that renegotiation is exactly what caused receipts to print as a
+    // small block pinned to the left of an otherwise blank full page.
+    // Locking the job to the receipt's real format keeps output filling the
+    // 58mm/80mm roll edge to edge.
+    await Printing.layoutPdf(
+      onLayout: (_) async => bytes,
+      format: _receiptFormat(widthMm, order.items.length),
+      dynamicLayout: false,
+    );
   }
 
   Future<void> shareReceipt(
