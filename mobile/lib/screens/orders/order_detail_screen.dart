@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 import '../../core/theme/app_colors.dart';
 import '../../core/utils/formatters.dart';
@@ -14,6 +15,7 @@ import '../pos/bill_success_screen.dart';
 import '../../providers/auth_provider.dart';
 import 'qr_checkout_sheet.dart';
 import '../../providers/connectivity_provider.dart';
+import '../settings/printer_settings_screen.dart';
 
 class OrderDetailScreen extends StatefulWidget {
   final String orderId;
@@ -103,6 +105,36 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> with WidgetsBindi
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(content: Text('Could not print/share the receipt. Please try again.')),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
+  Future<void> _printOnThermalPrinter(Order order) async {
+    if (_busy) return;
+    setState(() => _busy = true);
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final widthMm = prefs.getDouble('thermal_printer_width_mm') ?? 80;
+      final ok = await _receiptService.printViaBluetooth(order, _settings, widthMm: widthMm);
+      if (!mounted) return;
+      if (!ok) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: const Text('No printer connected.'),
+            action: SnackBarAction(
+              label: 'Connect',
+              onPressed: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => PrinterSettingsScreen())),
+            ),
+          ),
+        );
+      }
+    } catch (_) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Could not print the receipt. Please try again.')),
         );
       }
     } finally {
@@ -281,14 +313,7 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> with WidgetsBindi
             TextButton.icon(
               icon: Icon(Icons.print, size: 22),
               label: const Text('Print'),
-              onPressed: _busy
-                  ? null
-                  : () => _runReceiptAction(
-                        () => _receiptService.printReceipt(
-                          _order!,
-                          _settings,
-                        ),
-                      ),
+              onPressed: _busy ? null : () => _printOnThermalPrinter(_order!),
             ),
             IconButton(
               icon: Icon(Icons.share_outlined),

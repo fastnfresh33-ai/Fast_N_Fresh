@@ -1,10 +1,12 @@
 import 'package:flutter/material.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import '../../core/theme/app_colors.dart';
 import '../../core/utils/formatters.dart';
 import '../../models/order.dart';
 import '../../models/misc_models.dart';
 import '../../services/receipt_service.dart';
 import '../../services/misc_services.dart';
+import '../settings/printer_settings_screen.dart';
 
 class BillSuccessScreen extends StatefulWidget {
   final Order order;
@@ -47,6 +49,33 @@ class _BillSuccessScreenState extends State<BillSuccessScreen> {
     }
   }
 
+  Future<void> _printOnThermalPrinter(Order order) async {
+    setState(() => _busy = true);
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final widthMm = prefs.getDouble('thermal_printer_width_mm') ?? 80;
+      final ok = await _receiptService.printViaBluetooth(order, _settings, widthMm: widthMm);
+      if (!mounted) return;
+      if (!ok) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('No printer connected.'),
+            action: SnackBarAction(
+              label: 'Connect',
+              onPressed: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => PrinterSettingsScreen())),
+            ),
+          ),
+        );
+      }
+    } catch (_) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Could not print the receipt. Please try again.')));
+      }
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final order = widget.order;
@@ -74,7 +103,7 @@ class _BillSuccessScreenState extends State<BillSuccessScreen> {
               Row(children: [
                 Expanded(
                   child: OutlinedButton.icon(
-                    onPressed: _busy ? null : () => _runAction(() => _receiptService.printReceipt(order, _settings)),
+                    onPressed: _busy ? null : () => _printOnThermalPrinter(order),
                     icon: Icon(Icons.print, size: 20),
                     label: Text('Print Receipt'),
                   ),

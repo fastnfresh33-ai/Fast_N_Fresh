@@ -7,6 +7,7 @@
     "start": "node src/app.js",
     "dev": "nodemon src/app.js",
     "seed": "node src/utils/seed.js",
+    "seed:menu": "node src/utils/seedMenuFromPdf.js",
     "migrate:table-numbers": "node src/utils/migrateTableNumbers.js"
   },
   "dependencies": {

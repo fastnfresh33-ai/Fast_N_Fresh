@@ -9,6 +9,7 @@ import '../../providers/connectivity_provider.dart';
 import '../../services/misc_services.dart';
 import '../../services/auth_service.dart';
 import '../../providers/theme_provider.dart';
+import 'printer_settings_screen.dart';
 
 class SettingsScreen extends StatefulWidget {
   SettingsScreen({super.key});
@@ -184,6 +185,18 @@ class _SettingsScreenState extends State<SettingsScreen> with WidgetsBindingObse
                     _field(_defaultDiscountController, 'Default Discount (₹)', keyboardType: TextInputType.number),
                     SizedBox(height: 20),
                     ElevatedButton(onPressed: _save, child: Text('Save Settings')),
+                    SizedBox(height: 28),
+                    _sectionTitle('Printer'),
+                    Container(
+                      decoration: BoxDecoration(color: AppColors.surface, borderRadius: BorderRadius.circular(12), border: Border.all(color: AppColors.border)),
+                      child: ListTile(
+                        leading: Icon(Icons.print_outlined),
+                        title: Text('Bluetooth Receipt Printer'),
+                        subtitle: Text('58mm / 80mm thermal printer for the billing counter'),
+                        trailing: Icon(Icons.chevron_right, color: AppColors.textMuted),
+                        onTap: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => PrinterSettingsScreen())),
+                      ),
+                    ),
                     SizedBox(height: 28),
                     _sectionTitle('Security'),
                     Container(

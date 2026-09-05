@@ -137,6 +137,14 @@ packages:
       url: "https://pub.dev"
     source: hosted
     version: "3.0.7"
+  csslib:
+    dependency: transitive
+    description:
+      name: csslib
+      sha256: "09bad715f418841f976c77db72d5398dc1253c21fb9c0c7f0b0b985860b2d58e"
+      url: "https://pub.dev"
+    source: hosted
+    version: "1.0.2"
   cupertino_icons:
     dependency: "direct main"
     description:
@@ -177,6 +185,14 @@ packages:
       url: "https://pub.dev"
     source: hosted
     version: "2.1.0"
+  esc_pos_utils_plus:
+    dependency: "direct main"
+    description:
+      name: esc_pos_utils_plus
+      sha256: "2a22d281cb6f04600ba3ebd607ad8df03a4b2446d814007d22525bab4d50c2ff"
+      url: "https://pub.dev"
+    source: hosted
+    version: "2.0.4"
   fake_async:
     dependency: transitive
     description:
@@ -480,6 +496,14 @@ packages:
       url: "https://pub.dev"
     source: hosted
     version: "2.2.0"
+  html:
+    dependency: transitive
+    description:
+      name: html
+      sha256: "43b67b8f43321ab066817dfac5619596c98bb1b61624e77203bb4351785f9699"
+      url: "https://pub.dev"
+    source: hosted
+    version: "0.15.7"
   http:
     dependency: transitive
     description:
@@ -896,6 +920,14 @@ packages:
       url: "https://pub.dev"
     source: hosted
     version: "6.5.2"
+  print_bluetooth_thermal:
+    dependency: "direct main"
+    description:
+      name: print_bluetooth_thermal
+      sha256: b255c42cfe0b22d53d7226b41ca954b864e47875b1a99698d3e2726a03864089
+      url: "https://pub.dev"
+    source: hosted
+    version: "1.2.4"
   printing:
     dependency: "direct main"
     description:
@@ -1181,6 +1213,14 @@ packages:
       url: "https://pub.dev"
     source: hosted
     version: "5.15.0"
+  win_ble:
+    dependency: transitive
+    description:
+      name: win_ble
+      sha256: "2a867e13c4b355b101fc2c6e2ac85eeebf965db34eca46856f8b478e93b41e96"
+      url: "https://pub.dev"
+    source: hosted
+    version: "1.1.1"
   xdg_directories:
     dependency: transitive
     description:
